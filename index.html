@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>SmartOS - Enterprise V14</title>
+    <title>SmartOS - Enterprise V15</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -37,6 +37,8 @@
     <script type="text/babel" data-type="module">
         import React, { useState, useEffect, useMemo } from 'https://esm.sh/react@18.2.0';
         import { createRoot } from 'https://esm.sh/react-dom@18.2.0/client';
+        
+        // --- CORREÇÃO AQUI: Adicionei 'Phone' na lista de importações ---
         import { 
             LayoutDashboard, ClipboardList, Plus, Search, LogOut, Wrench, 
             Smartphone, Laptop, DollarSign, CheckCircle2, Clock, AlertCircle, 
@@ -143,7 +145,7 @@
             const [newUserEmail, setNewUserEmail] = useState('');
             const [newUserPass, setNewUserPass] = useState('');
 
-            // Adicionado clientPhone ao state inicial
+            // CORREÇÃO: clientPhone adicionado no initialForm
             const initialForm = { clientName: '', clientPhone: '', deviceType: 'Smartphone', deviceModel: '', problem: '', serviceDone: '', status: 'Aberto', price: '', cost: '', notes: '', dateEntry: new Date().toISOString().split('T')[0], dateExit: '', warrantyDays: '90', passwordType: 'none', passwordText: '', passwordPattern: [], checklist: { wontTurnOn: false, screenBroken: false, backBroken: false, notCharging: false, noWifi: false, cameraBad: false }, payments: [], extraCosts: [] };
             const [formData, setFormData] = useState(initialForm);
             
@@ -251,17 +253,13 @@
             const openViewOS = (os) => { setEditingId(os.id); setFormData({ ...initialForm, ...os }); setModalMode('view'); setIsModalOpen(true); }
             const openEditOS = (os) => { setEditingId(os.id); setFormData({ ...initialForm, ...os }); setModalMode('edit'); setIsModalOpen(true); }
 
-            // Lógica WhatsApp Melhorada
             const handleWhatsApp = (os) => {
                 let text = `Olá *${os.clientName}*! 👋\n\nSobre seu *${os.deviceModel}* (OS #${os.osNumber}).\nStatus: *${os.status}*\nValor: R$ ${os.price}\n\nFico à disposição!`;
-                // Se tiver telefone cadastrado, limpa e usa no link
                 if (os.clientPhone) {
-                    const cleanPhone = os.clientPhone.replace(/\D/g, ''); // Remove tudo que não é número
-                    // Adiciona 55 se não tiver e se parecer um número BR (10 ou 11 digitos)
+                    const cleanPhone = os.clientPhone.replace(/\D/g, '');
                     const fullPhone = (cleanPhone.length >= 10 && cleanPhone.length <= 11) ? `55${cleanPhone}` : cleanPhone;
                     window.open(`https://wa.me/${fullPhone}?text=${encodeURIComponent(text)}`, '_blank');
                 } else {
-                    // Sem número, abre lista de contatos
                     window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
                 }
             }
@@ -289,13 +287,13 @@
 
             if (loading) return <div className="min-h-screen flex items-center justify-center bg-slate-900 text-white">Carregando...</div>;
 
+            // --- TELA DE LOGIN ---
             if (!user || view === 'login') return (
                 <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-6">
                     <div className="bg-slate-800 w-full max-w-sm p-8 rounded-2xl shadow-2xl border border-slate-700 animate-in">
                         <div className="flex justify-center mb-6"><div className="bg-blue-600 p-4 rounded-xl"><Wrench className="text-white" size={32} /></div></div>
                         <h1 className="text-2xl font-bold text-white text-center mb-2">SmartOS</h1>
                         <p className="text-slate-400 text-center text-xs mb-6">Acesso Restrito</p>
-                        
                         <form onSubmit={handleAuth} className="space-y-4">
                             <div className="relative">
                                 <Mail className="absolute left-3 top-3 text-slate-500" size={20}/>
@@ -379,7 +377,7 @@
                                                 <div className="flex flex-col"><span className="font-bold text-lg text-slate-800">{formatCurrency(order.price)}</span>{order.dateExit && <span className="text-[10px] text-gray-400 font-medium">Saída: {formatDateBR(order.dateExit)}</span>}</div>
                                                 <div className="flex gap-2">
                                                     <button onClick={(e) => { e.stopPropagation(); openReceipt(order); }} className="p-2 bg-gray-100 text-gray-600 rounded-full hover:bg-gray-200 active:scale-90 transition-transform"><Printer size={20}/></button>
-                                                    <button onClick={(e) => { e.stopPropagation(); handleWhatsApp(order); }} className="p-2 bg-green-50 text-green-600 rounded-full hover:bg-green-100 active:scale-90 transition-transform"><MessageCircle size={20}/></button>
+                                                    <button onClick={(e) => { e.stopPropagation(); handleWhatsApp(order); }} className="p-2 bg-green-50 text-green-600 rounded-full hover:bg-green-100 active:scale-90 transition-transform"><Phone size={20}/></button>
                                                     <button onClick={(e) => { e.stopPropagation(); openViewOS(order); }} className="p-2 bg-blue-50 text-blue-600 rounded-full hover:bg-blue-100 active:scale-90 transition-transform"><Eye size={20}/></button>
                                                     <button onClick={(e) => { e.stopPropagation(); openEditOS(order); }} className="p-2 bg-orange-50 text-orange-500 rounded-full hover:bg-orange-100 active:scale-90 transition-transform"><PenSquare size={20}/></button>
                                                     <button onClick={(e) => { e.stopPropagation(); promptDelete(order.id); }} className="p-2 bg-red-50 text-red-500 rounded-full hover:bg-red-100 active:scale-90 transition-transform"><Trash2 size={20}/></button>
@@ -391,6 +389,7 @@
                             </div>
                         )}
 
+                        {/* --- VIEW: EQUIPE --- */}
                         {view === 'team' && isAdmin && (
                             <div className="animate-in h-full flex flex-col p-4 overflow-y-auto">
                                 <div className="bg-white p-6 rounded-2xl shadow-md border border-gray-100 mb-6">
@@ -415,6 +414,7 @@
                         )}
                     </main>
 
+                    {/* MODAL CRIAR USUÁRIO */}
                     {isUserModalOpen && (
                         <div className="fixed inset-0 z-[80] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
                             <div className="bg-white w-full max-w-sm rounded-2xl p-6 shadow-2xl animate-in">
@@ -428,6 +428,7 @@
                         </div>
                     )}
 
+                    {/* MODAL PRINCIPAL */}
                     {isModalOpen && (
                         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center">
                             <div className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-2xl h-[95vh] sm:h-[90vh] flex flex-col animate-in shadow-2xl">
