@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>SmartOS - Enterprise V15</title>
+    <title>SmartOS - Enterprise V17</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -38,12 +38,11 @@
         import React, { useState, useEffect, useMemo } from 'https://esm.sh/react@18.2.0';
         import { createRoot } from 'https://esm.sh/react-dom@18.2.0/client';
         
-        // --- CORREÇÃO AQUI: Adicionei 'Phone' na lista de importações ---
         import { 
             LayoutDashboard, ClipboardList, Plus, Search, LogOut, Wrench, 
             Smartphone, Laptop, DollarSign, CheckCircle2, Clock, AlertCircle, 
             X, User, Save, Trash2, Edit, Lock, Mail, Eye, EyeOff, Calendar, Share2, AlertTriangle, 
-            Power, BatteryCharging, Wifi, Camera, ShieldAlert, TrendingUp, Store, Megaphone, Hammer, CreditCard, Banknote, PenSquare, Gift, Printer, FileText, ShieldCheck, Timer, Users, UserPlus, Phone
+            Power, BatteryCharging, Wifi, Camera, ShieldAlert, TrendingUp, Store, Megaphone, Hammer, CreditCard, Banknote, PenSquare, Gift, Printer, FileText, ShieldCheck, Timer, Users, UserPlus, Phone, Briefcase
         } from 'https://esm.sh/lucide-react@0.263.1';
 
         import { initializeApp, deleteApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
@@ -131,7 +130,6 @@
             const [filteredOrders, setFilteredOrders] = useState([]);
             const [searchTerm, setSearchTerm] = useState('');
             const [timeFilter, setTimeFilter] = useState('month'); 
-            const [usersList, setUsersList] = useState([]);
             const [teamMembers, setTeamMembers] = useState([]);
             
             const [isModalOpen, setIsModalOpen] = useState(false);
@@ -142,10 +140,12 @@
             
             const [visiblePasswords, setVisiblePasswords] = useState({});
             const [isUserModalOpen, setIsUserModalOpen] = useState(false);
+            
+            // ESTADOS DE CRIAÇÃO DE USUÁRIO (COM CARGO)
             const [newUserEmail, setNewUserEmail] = useState('');
             const [newUserPass, setNewUserPass] = useState('');
+            const [newUserRole, setNewUserRole] = useState('Atendente'); // Padrão
 
-            // CORREÇÃO: clientPhone adicionado no initialForm
             const initialForm = { clientName: '', clientPhone: '', deviceType: 'Smartphone', deviceModel: '', problem: '', serviceDone: '', status: 'Aberto', price: '', cost: '', notes: '', dateEntry: new Date().toISOString().split('T')[0], dateExit: '', warrantyDays: '90', passwordType: 'none', passwordText: '', passwordPattern: [], checklist: { wontTurnOn: false, screenBroken: false, backBroken: false, notCharging: false, noWifi: false, cameraBad: false }, payments: [], extraCosts: [] };
             const [formData, setFormData] = useState(initialForm);
             
@@ -158,9 +158,9 @@
             const [notification, setNotification] = useState(null);
             const [saving, setSaving] = useState(false);
             
+            // Login limpo
             const [email, setEmail] = useState('');
             const [password, setPassword] = useState('');
-            const [authMode, setAuthMode] = useState('login'); 
             const [loading, setLoading] = useState(true);
 
             const isAdmin = user && user.email === 'admin@smartos.com';
@@ -169,7 +169,7 @@
             
             useEffect(() => {
                 if (!user) return;
-                const qOrders = query(collection(db, 'users', user.uid, 'service_orders'));
+                const qOrders = query(collection(db, 'service_orders'));
                 const unsubOrders = onSnapshot(qOrders, (snap) => {
                     const data = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
                     setOrders(data); setFilteredOrders(data);
@@ -177,7 +177,7 @@
 
                 let unsubTeam = () => {};
                 if (isAdmin) {
-                    const qTeam = query(collection(db, 'users', user.uid, 'team_members'), orderBy('createdAt', 'desc'));
+                    const qTeam = query(collection(db, 'team_members'), orderBy('createdAt', 'desc'));
                     unsubTeam = onSnapshot(qTeam, (snap) => {
                         const members = snap.docs.map(d => ({ id: d.id, ...d.data() }));
                         setTeamMembers(members);
@@ -203,6 +203,7 @@
                 } 
             };
 
+            // --- CRIAÇÃO DE USUÁRIO COM CARGO ---
             const handleCreateUser = async (e) => {
                 e.preventDefault();
                 setSaving(true);
@@ -211,15 +212,23 @@
                     const secondaryAuth = getAuth(secondaryApp);
                     await createUserWithEmailAndPassword(secondaryAuth, newUserEmail, newUserPass);
                     await signOut(secondaryAuth);
-                    await addDoc(collection(db, 'users', user.uid, 'team_members'), { email: newUserEmail, password: newUserPass, createdAt: serverTimestamp() });
-                    showNotification(`Técnico ${newUserEmail} criado!`);
+                    
+                    // Adiciona na lista com o CARGO
+                    await addDoc(collection(db, 'team_members'), { 
+                        email: newUserEmail, 
+                        password: newUserPass, 
+                        role: newUserRole, // Novo campo
+                        createdAt: serverTimestamp() 
+                    });
+                    
+                    showNotification(`Colaborador ${newUserEmail} criado!`);
                     setIsUserModalOpen(false); setNewUserEmail(''); setNewUserPass('');
                 } catch (err) { showNotification("Erro: " + err.message, "error"); } finally { setSaving(false); }
             };
 
             const handleDeleteMember = async (id) => {
                 if(confirm("Remover da lista?")) {
-                    try { await deleteDoc(doc(db, 'users', user.uid, 'team_members', id)); showNotification("Removido."); } catch(e) { showNotification("Erro.", "error"); }
+                    try { await deleteDoc(doc(db, 'team_members', id)); showNotification("Removido."); } catch(e) { showNotification("Erro.", "error"); }
                 }
             };
 
@@ -231,11 +240,11 @@
                 if (!formData.clientName || !formData.deviceModel) { showNotification("Nome e Modelo obrigatórios!", "error"); return; }
                 setSaving(true);
                 try {
-                    const ref = collection(db, 'users', user.uid, 'service_orders');
+                    const ref = collection(db, 'service_orders');
                     let finalDateExit = formData.dateExit;
                     if (formData.status === 'Concluído' && !finalDateExit) finalDateExit = new Date().toISOString().split('T')[0];
-                    const data = { ...formData, price: formData.price || '0', cost: formData.cost || '0', dateExit: finalDateExit, updatedAt: serverTimestamp() };
-                    if (editingId) { await updateDoc(doc(db, 'users', user.uid, 'service_orders', editingId), data); showNotification("Atualizado!"); } 
+                    const data = { ...formData, price: formData.price || '0', cost: formData.cost || '0', dateExit: finalDateExit, updatedAt: serverTimestamp(), createdBy: user.email };
+                    if (editingId) { await updateDoc(doc(db, 'service_orders', editingId), data); showNotification("Atualizado!"); } 
                     else { await addDoc(ref, { ...data, createdAt: serverTimestamp(), osNumber: Math.floor(1000 + Math.random() * 9000) }); showNotification("Criado!"); }
                     setIsModalOpen(false); setFormData(initialForm); setEditingId(null);
                 } catch (err) { showNotification("Erro: " + err.code, "error"); } finally { setSaving(false); }
@@ -247,7 +256,7 @@
             const removeExtraCost = (index) => { setFormData(p => ({ ...p, extraCosts: p.extraCosts.filter((_, i) => i !== index) })); };
             
             const promptDelete = (id) => { setItemToDelete(id); setIsDeleteModalOpen(true); }
-            const confirmDelete = async () => { if (!itemToDelete) return; try { await deleteDoc(doc(db, 'users', user.uid, 'service_orders', itemToDelete)); showNotification("Excluído."); setIsDeleteModalOpen(false); } catch (err) { showNotification("Erro ao excluir", "error"); } }
+            const confirmDelete = async () => { if (!itemToDelete) return; try { await deleteDoc(doc(db, 'service_orders', itemToDelete)); showNotification("Excluído."); setIsDeleteModalOpen(false); } catch (err) { showNotification("Erro ao excluir", "error"); } }
 
             const openNewOS = () => { setEditingId(null); setFormData(initialForm); setModalMode('edit'); setIsModalOpen(true); }
             const openViewOS = (os) => { setEditingId(os.id); setFormData({ ...initialForm, ...os }); setModalMode('view'); setIsModalOpen(true); }
@@ -294,6 +303,7 @@
                         <div className="flex justify-center mb-6"><div className="bg-blue-600 p-4 rounded-xl"><Wrench className="text-white" size={32} /></div></div>
                         <h1 className="text-2xl font-bold text-white text-center mb-2">SmartOS</h1>
                         <p className="text-slate-400 text-center text-xs mb-6">Acesso Restrito</p>
+                        
                         <form onSubmit={handleAuth} className="space-y-4">
                             <div className="relative">
                                 <Mail className="absolute left-3 top-3 text-slate-500" size={20}/>
@@ -389,39 +399,54 @@
                             </div>
                         )}
 
-                        {/* --- VIEW: EQUIPE --- */}
+                        {/* --- VIEW: EQUIPE (ATUALIZADO) --- */}
                         {view === 'team' && isAdmin && (
                             <div className="animate-in h-full flex flex-col p-4 overflow-y-auto">
                                 <div className="bg-white p-6 rounded-2xl shadow-md border border-gray-100 mb-6">
                                     <div className="bg-blue-100 w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3 text-blue-600"><Users size={24}/></div>
-                                    <h3 className="text-xl font-bold text-gray-800 text-center mb-4">Cadastrar Novo Técnico</h3>
-                                    <Button onClick={() => setIsUserModalOpen(true)} className="w-full flex items-center justify-center gap-2"><UserPlus size={20}/> Adicionar Técnico</Button>
+                                    <h3 className="text-xl font-bold text-gray-800 text-center mb-4">Cadastrar Novo Colaborador</h3>
+                                    <Button onClick={() => setIsUserModalOpen(true)} className="w-full flex items-center justify-center gap-2"><UserPlus size={20}/> Adicionar Usuário</Button>
                                 </div>
-                                <h4 className="text-sm font-bold text-gray-500 uppercase mb-3 ml-1">Técnicos Cadastrados</h4>
+                                <h4 className="text-sm font-bold text-gray-500 uppercase mb-3 ml-1">Membros da Equipe</h4>
                                 <div className="space-y-3 pb-24">
                                     {teamMembers.map(member => (
                                         <div key={member.id} className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm flex items-center justify-between">
                                             <div className="flex-1">
-                                                <div className="flex items-center gap-2 mb-1"><div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500"><User size={16}/></div><p className="font-bold text-sm text-gray-800">{member.email}</p></div>
-                                                <div className="flex items-center gap-2 text-xs text-gray-500 bg-gray-50 p-2 rounded-lg w-fit"><Lock size={12} /><span className="font-mono tracking-wider">{visiblePasswords[member.id] ? member.password : '••••••••'}</span><button onClick={() => togglePassword(member.id)} className="ml-2 text-blue-500 hover:text-blue-700">{visiblePasswords[member.id] ? <EyeOff size={14}/> : <Eye size={14}/>}</button></div>
+                                                <div className="flex flex-col mb-2">
+                                                    <div className="flex items-center gap-2">
+                                                        <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500"><User size={16}/></div>
+                                                        <p className="font-bold text-sm text-gray-800">{member.email}</p>
+                                                    </div>
+                                                    <span className="ml-10 text-xs font-bold text-blue-500 bg-blue-50 px-2 py-0.5 rounded-md w-fit">{member.role || 'Atendente'}</span>
+                                                </div>
+                                                <div className="flex items-center gap-2 text-xs text-gray-500 bg-gray-50 p-2 rounded-lg w-fit ml-10"><Lock size={12} /><span className="font-mono tracking-wider">{visiblePasswords[member.id] ? member.password : '••••••••'}</span><button onClick={() => togglePassword(member.id)} className="ml-2 text-blue-500 hover:text-blue-700">{visiblePasswords[member.id] ? <EyeOff size={14}/> : <Eye size={14}/>}</button></div>
                                             </div>
                                             <button onClick={() => handleDeleteMember(member.id)} className="p-2 text-red-400 hover:bg-red-50 rounded-lg"><Trash2 size={18}/></button>
                                         </div>
                                     ))}
-                                    {teamMembers.length === 0 && <p className="text-center text-gray-400 text-sm py-4">Nenhum técnico na lista.</p>}
+                                    {teamMembers.length === 0 && <p className="text-center text-gray-400 text-sm py-4">Nenhum colaborador na lista.</p>}
                                 </div>
                             </div>
                         )}
                     </main>
 
-                    {/* MODAL CRIAR USUÁRIO */}
+                    {/* MODAL CRIAR USUÁRIO (ATUALIZADO COM CARGO) */}
                     {isUserModalOpen && (
                         <div className="fixed inset-0 z-[80] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
                             <div className="bg-white w-full max-w-sm rounded-2xl p-6 shadow-2xl animate-in">
-                                <div className="flex justify-between items-center mb-4"><h3 className="text-lg font-bold text-gray-800">Novo Técnico</h3><button onClick={() => setIsUserModalOpen(false)}><X size={20} className="text-gray-400"/></button></div>
+                                <div className="flex justify-between items-center mb-4"><h3 className="text-lg font-bold text-gray-800">Novo Colaborador</h3><button onClick={() => setIsUserModalOpen(false)}><X size={20} className="text-gray-400"/></button></div>
                                 <form onSubmit={handleCreateUser} className="space-y-4">
                                     <div><label className="text-xs font-bold text-gray-400 uppercase">Email</label><input type="email" required className="w-full bg-gray-50 border p-3 rounded-lg outline-none" value={newUserEmail} onChange={e => setNewUserEmail(e.target.value)} /></div>
                                     <div><label className="text-xs font-bold text-gray-400 uppercase">Senha</label><input type="password" required className="w-full bg-gray-50 border p-3 rounded-lg outline-none" value={newUserPass} onChange={e => setNewUserPass(e.target.value)} /></div>
+                                    <div>
+                                        <label className="text-xs font-bold text-gray-400 uppercase">Cargo / Função</label>
+                                        <select className="w-full bg-gray-50 border p-3 rounded-lg outline-none" value={newUserRole} onChange={e => setNewUserRole(e.target.value)}>
+                                            <option>Atendente</option>
+                                            <option>Gerente</option>
+                                            <option>Técnico Auxiliar</option>
+                                            <option>Caixa</option>
+                                        </select>
+                                    </div>
                                     <Button type="submit" className="w-full" disabled={saving}>{saving ? 'Criando...' : 'Cadastrar'}</Button>
                                 </form>
                             </div>
