@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>SmartOS - Enterprise V13</title>
+    <title>SmartOS - Enterprise V14</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -41,10 +41,10 @@
             LayoutDashboard, ClipboardList, Plus, Search, LogOut, Wrench, 
             Smartphone, Laptop, DollarSign, CheckCircle2, Clock, AlertCircle, 
             X, User, Save, Trash2, Edit, Lock, Mail, Eye, EyeOff, Calendar, Share2, AlertTriangle, 
-            Power, BatteryCharging, Wifi, Camera, ShieldAlert, TrendingUp, Store, Megaphone, Hammer, CreditCard, Banknote, PenSquare, Gift, Printer, FileText, ShieldCheck, Timer, Users, UserPlus
+            Power, BatteryCharging, Wifi, Camera, ShieldAlert, TrendingUp, Store, Megaphone, Hammer, CreditCard, Banknote, PenSquare, Gift, Printer, FileText, ShieldCheck, Timer, Users, UserPlus, Phone
         } from 'https://esm.sh/lucide-react@0.263.1';
 
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { initializeApp, deleteApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
         import { 
             getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut 
         } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
@@ -126,10 +126,11 @@
             const [user, setUser] = useState(null);
             const [view, setView] = useState('login'); 
             const [orders, setOrders] = useState([]);
-            const [teamMembers, setTeamMembers] = useState([]); // Lista da equipe
             const [filteredOrders, setFilteredOrders] = useState([]);
             const [searchTerm, setSearchTerm] = useState('');
             const [timeFilter, setTimeFilter] = useState('month'); 
+            const [usersList, setUsersList] = useState([]);
+            const [teamMembers, setTeamMembers] = useState([]);
             
             const [isModalOpen, setIsModalOpen] = useState(false);
             const [modalMode, setModalMode] = useState('view');
@@ -137,15 +138,13 @@
             const [itemToDelete, setItemToDelete] = useState(null);
             const [receiptData, setReceiptData] = useState(null);
             
-            // Controle de visibilidade de senha
             const [visiblePasswords, setVisiblePasswords] = useState({});
-
-            // Modal Criar Usuário
             const [isUserModalOpen, setIsUserModalOpen] = useState(false);
             const [newUserEmail, setNewUserEmail] = useState('');
             const [newUserPass, setNewUserPass] = useState('');
 
-            const initialForm = { clientName: '', deviceType: 'Smartphone', deviceModel: '', problem: '', serviceDone: '', status: 'Aberto', price: '', cost: '', notes: '', dateEntry: new Date().toISOString().split('T')[0], dateExit: '', warrantyDays: '90', passwordType: 'none', passwordText: '', passwordPattern: [], checklist: { wontTurnOn: false, screenBroken: false, backBroken: false, notCharging: false, noWifi: false, cameraBad: false }, payments: [], extraCosts: [] };
+            // Adicionado clientPhone ao state inicial
+            const initialForm = { clientName: '', clientPhone: '', deviceType: 'Smartphone', deviceModel: '', problem: '', serviceDone: '', status: 'Aberto', price: '', cost: '', notes: '', dateEntry: new Date().toISOString().split('T')[0], dateExit: '', warrantyDays: '90', passwordType: 'none', passwordText: '', passwordPattern: [], checklist: { wontTurnOn: false, screenBroken: false, backBroken: false, notCharging: false, noWifi: false, cameraBad: false }, payments: [], extraCosts: [] };
             const [formData, setFormData] = useState(initialForm);
             
             const [newPaymentAmount, setNewPaymentAmount] = useState('');
@@ -157,28 +156,23 @@
             const [notification, setNotification] = useState(null);
             const [saving, setSaving] = useState(false);
             
-            // Estados de Login
             const [email, setEmail] = useState('');
             const [password, setPassword] = useState('');
             const [authMode, setAuthMode] = useState('login'); 
             const [loading, setLoading] = useState(true);
 
-            // Verifica se é Admin
             const isAdmin = user && user.email === 'admin@smartos.com';
 
             useEffect(() => { const u = onAuthStateChanged(auth, (u) => { setUser(u); if (u) setView('dashboard'); else setView('login'); setLoading(false); }); return () => u(); }, []);
             
             useEffect(() => {
                 if (!user) return;
-                
-                // 1. Carregar Ordens
                 const qOrders = query(collection(db, 'users', user.uid, 'service_orders'));
                 const unsubOrders = onSnapshot(qOrders, (snap) => {
                     const data = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
                     setOrders(data); setFilteredOrders(data);
                 }, (err) => { if(err.code === 'permission-denied') showNotification("Erro de permissão.", "error"); });
 
-                // 2. Carregar Equipe (Se for Admin)
                 let unsubTeam = () => {};
                 if (isAdmin) {
                     const qTeam = query(collection(db, 'users', user.uid, 'team_members'), orderBy('createdAt', 'desc'));
@@ -187,7 +181,6 @@
                         setTeamMembers(members);
                     });
                 }
-
                 return () => { unsubOrders(); unsubTeam(); };
             }, [user, isAdmin]);
 
@@ -208,50 +201,27 @@
                 } 
             };
 
-            // --- CRIAÇÃO DE USUÁRIO + SALVAR NA LISTA ---
             const handleCreateUser = async (e) => {
                 e.preventDefault();
                 setSaving(true);
                 try {
-                    // 1. Criar no Authentication
                     const secondaryApp = initializeApp(firebaseConfig, "Secondary");
                     const secondaryAuth = getAuth(secondaryApp);
                     await createUserWithEmailAndPassword(secondaryAuth, newUserEmail, newUserPass);
                     await signOut(secondaryAuth);
-                    
-                    // 2. Salvar na coleção 'team_members' para visualização
-                    // (Isso é um 'caderninho' para o Admin ver, não afeta o login real)
-                    await addDoc(collection(db, 'users', user.uid, 'team_members'), {
-                        email: newUserEmail,
-                        password: newUserPass, // Salva para o admin ver (Cuidado: Segurança básica)
-                        createdAt: serverTimestamp()
-                    });
-
+                    await addDoc(collection(db, 'users', user.uid, 'team_members'), { email: newUserEmail, password: newUserPass, createdAt: serverTimestamp() });
                     showNotification(`Técnico ${newUserEmail} criado!`);
                     setIsUserModalOpen(false); setNewUserEmail(''); setNewUserPass('');
-                } catch (err) {
-                    console.error(err);
-                    showNotification("Erro: " + err.message, "error");
-                } finally {
-                    setSaving(false);
-                }
+                } catch (err) { showNotification("Erro: " + err.message, "error"); } finally { setSaving(false); }
             };
 
             const handleDeleteMember = async (id) => {
-                if(confirm("Remover da lista? (A conta continuará existindo no Firebase, apenas sairá daqui)")) {
-                    try {
-                        await deleteDoc(doc(db, 'users', user.uid, 'team_members', id));
-                        showNotification("Removido da lista.");
-                    } catch(e) { showNotification("Erro ao remover.", "error"); }
+                if(confirm("Remover da lista?")) {
+                    try { await deleteDoc(doc(db, 'users', user.uid, 'team_members', id)); showNotification("Removido."); } catch(e) { showNotification("Erro.", "error"); }
                 }
             };
 
-            const togglePassword = (id) => {
-                setVisiblePasswords(prev => ({
-                    ...prev,
-                    [id]: !prev[id]
-                }));
-            };
+            const togglePassword = (id) => { setVisiblePasswords(prev => ({ ...prev, [id]: !prev[id] })); };
 
             const handleSave = async (e) => {
                 if(e) e.preventDefault();
@@ -281,6 +251,21 @@
             const openViewOS = (os) => { setEditingId(os.id); setFormData({ ...initialForm, ...os }); setModalMode('view'); setIsModalOpen(true); }
             const openEditOS = (os) => { setEditingId(os.id); setFormData({ ...initialForm, ...os }); setModalMode('edit'); setIsModalOpen(true); }
 
+            // Lógica WhatsApp Melhorada
+            const handleWhatsApp = (os) => {
+                let text = `Olá *${os.clientName}*! 👋\n\nSobre seu *${os.deviceModel}* (OS #${os.osNumber}).\nStatus: *${os.status}*\nValor: R$ ${os.price}\n\nFico à disposição!`;
+                // Se tiver telefone cadastrado, limpa e usa no link
+                if (os.clientPhone) {
+                    const cleanPhone = os.clientPhone.replace(/\D/g, ''); // Remove tudo que não é número
+                    // Adiciona 55 se não tiver e se parecer um número BR (10 ou 11 digitos)
+                    const fullPhone = (cleanPhone.length >= 10 && cleanPhone.length <= 11) ? `55${cleanPhone}` : cleanPhone;
+                    window.open(`https://wa.me/${fullPhone}?text=${encodeURIComponent(text)}`, '_blank');
+                } else {
+                    // Sem número, abre lista de contatos
+                    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+                }
+            }
+
             const openReceipt = (os) => { setReceiptData(os); };
             const closeReceipt = () => { setReceiptData(null); };
             const printReceipt = () => { window.print(); };
@@ -304,7 +289,6 @@
 
             if (loading) return <div className="min-h-screen flex items-center justify-center bg-slate-900 text-white">Carregando...</div>;
 
-            // --- TELA DE LOGIN (SEM CRIAR CONTA PÚBLICO) ---
             if (!user || view === 'login') return (
                 <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-6">
                     <div className="bg-slate-800 w-full max-w-sm p-8 rounded-2xl shadow-2xl border border-slate-700 animate-in">
@@ -339,7 +323,6 @@
                         <div className="flex bg-slate-800 p-1 rounded-xl mb-2 overflow-x-auto">
                             <button onClick={() => setView('dashboard')} className={`flex-1 py-2 px-4 rounded-lg text-sm font-bold whitespace-nowrap transition-all ${view === 'dashboard' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400'}`}>Início</button>
                             <button onClick={() => setView('orders')} className={`flex-1 py-2 px-4 rounded-lg text-sm font-bold whitespace-nowrap transition-all ${view === 'orders' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400'}`}>Ordens</button>
-                            {/* MENU EQUIPE (SÓ ADMIN VÊ) */}
                             {isAdmin && <button onClick={() => setView('team')} className={`flex-1 py-2 px-4 rounded-lg text-sm font-bold whitespace-nowrap transition-all ${view === 'team' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400'}`}>Equipe</button>}
                         </div>
                     </header>
@@ -396,6 +379,7 @@
                                                 <div className="flex flex-col"><span className="font-bold text-lg text-slate-800">{formatCurrency(order.price)}</span>{order.dateExit && <span className="text-[10px] text-gray-400 font-medium">Saída: {formatDateBR(order.dateExit)}</span>}</div>
                                                 <div className="flex gap-2">
                                                     <button onClick={(e) => { e.stopPropagation(); openReceipt(order); }} className="p-2 bg-gray-100 text-gray-600 rounded-full hover:bg-gray-200 active:scale-90 transition-transform"><Printer size={20}/></button>
+                                                    <button onClick={(e) => { e.stopPropagation(); handleWhatsApp(order); }} className="p-2 bg-green-50 text-green-600 rounded-full hover:bg-green-100 active:scale-90 transition-transform"><MessageCircle size={20}/></button>
                                                     <button onClick={(e) => { e.stopPropagation(); openViewOS(order); }} className="p-2 bg-blue-50 text-blue-600 rounded-full hover:bg-blue-100 active:scale-90 transition-transform"><Eye size={20}/></button>
                                                     <button onClick={(e) => { e.stopPropagation(); openEditOS(order); }} className="p-2 bg-orange-50 text-orange-500 rounded-full hover:bg-orange-100 active:scale-90 transition-transform"><PenSquare size={20}/></button>
                                                     <button onClick={(e) => { e.stopPropagation(); promptDelete(order.id); }} className="p-2 bg-red-50 text-red-500 rounded-full hover:bg-red-100 active:scale-90 transition-transform"><Trash2 size={20}/></button>
@@ -407,7 +391,6 @@
                             </div>
                         )}
 
-                        {/* --- VIEW: EQUIPE (COM LISTA) --- */}
                         {view === 'team' && isAdmin && (
                             <div className="animate-in h-full flex flex-col p-4 overflow-y-auto">
                                 <div className="bg-white p-6 rounded-2xl shadow-md border border-gray-100 mb-6">
@@ -415,25 +398,13 @@
                                     <h3 className="text-xl font-bold text-gray-800 text-center mb-4">Cadastrar Novo Técnico</h3>
                                     <Button onClick={() => setIsUserModalOpen(true)} className="w-full flex items-center justify-center gap-2"><UserPlus size={20}/> Adicionar Técnico</Button>
                                 </div>
-
                                 <h4 className="text-sm font-bold text-gray-500 uppercase mb-3 ml-1">Técnicos Cadastrados</h4>
                                 <div className="space-y-3 pb-24">
                                     {teamMembers.map(member => (
                                         <div key={member.id} className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm flex items-center justify-between">
                                             <div className="flex-1">
-                                                <div className="flex items-center gap-2 mb-1">
-                                                    <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500"><User size={16}/></div>
-                                                    <p className="font-bold text-sm text-gray-800">{member.email}</p>
-                                                </div>
-                                                <div className="flex items-center gap-2 text-xs text-gray-500 bg-gray-50 p-2 rounded-lg w-fit">
-                                                    <Lock size={12} />
-                                                    <span className="font-mono tracking-wider">
-                                                        {visiblePasswords[member.id] ? member.password : '••••••••'}
-                                                    </span>
-                                                    <button onClick={() => togglePassword(member.id)} className="ml-2 text-blue-500 hover:text-blue-700">
-                                                        {visiblePasswords[member.id] ? <EyeOff size={14}/> : <Eye size={14}/>}
-                                                    </button>
-                                                </div>
+                                                <div className="flex items-center gap-2 mb-1"><div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500"><User size={16}/></div><p className="font-bold text-sm text-gray-800">{member.email}</p></div>
+                                                <div className="flex items-center gap-2 text-xs text-gray-500 bg-gray-50 p-2 rounded-lg w-fit"><Lock size={12} /><span className="font-mono tracking-wider">{visiblePasswords[member.id] ? member.password : '••••••••'}</span><button onClick={() => togglePassword(member.id)} className="ml-2 text-blue-500 hover:text-blue-700">{visiblePasswords[member.id] ? <EyeOff size={14}/> : <Eye size={14}/>}</button></div>
                                             </div>
                                             <button onClick={() => handleDeleteMember(member.id)} className="p-2 text-red-400 hover:bg-red-50 rounded-lg"><Trash2 size={18}/></button>
                                         </div>
@@ -444,14 +415,10 @@
                         )}
                     </main>
 
-                    {/* MODAL CRIAR USUÁRIO */}
                     {isUserModalOpen && (
                         <div className="fixed inset-0 z-[80] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
                             <div className="bg-white w-full max-w-sm rounded-2xl p-6 shadow-2xl animate-in">
-                                <div className="flex justify-between items-center mb-4">
-                                    <h3 className="text-lg font-bold text-gray-800">Novo Técnico</h3>
-                                    <button onClick={() => setIsUserModalOpen(false)}><X size={20} className="text-gray-400"/></button>
-                                </div>
+                                <div className="flex justify-between items-center mb-4"><h3 className="text-lg font-bold text-gray-800">Novo Técnico</h3><button onClick={() => setIsUserModalOpen(false)}><X size={20} className="text-gray-400"/></button></div>
                                 <form onSubmit={handleCreateUser} className="space-y-4">
                                     <div><label className="text-xs font-bold text-gray-400 uppercase">Email</label><input type="email" required className="w-full bg-gray-50 border p-3 rounded-lg outline-none" value={newUserEmail} onChange={e => setNewUserEmail(e.target.value)} /></div>
                                     <div><label className="text-xs font-bold text-gray-400 uppercase">Senha</label><input type="password" required className="w-full bg-gray-50 border p-3 rounded-lg outline-none" value={newUserPass} onChange={e => setNewUserPass(e.target.value)} /></div>
@@ -461,7 +428,6 @@
                         </div>
                     )}
 
-                    {/* MODAL PRINCIPAL */}
                     {isModalOpen && (
                         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center">
                             <div className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-2xl h-[95vh] sm:h-[90vh] flex flex-col animate-in shadow-2xl">
@@ -476,14 +442,14 @@
                                     {modalMode === 'view' ? (
                                         <div className="space-y-6">
                                             <div className="flex flex-col items-center gap-2"><StatusBadge status={formData.status} />{formData.status === 'Concluído' && formData.dateExit && (<WarrantyBadge dateExit={formData.dateExit} days={formData.warrantyDays} />)}</div>
-                                            <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100"><h4 className="text-xs font-bold text-gray-400 uppercase mb-3">Dados do Aparelho</h4><div className="space-y-2 text-sm"><div className="flex justify-between"><span className="text-gray-500">Cliente:</span> <span className="font-bold text-gray-800">{formData.clientName}</span></div><div className="flex justify-between"><span className="text-gray-500">Modelo:</span> <span className="font-bold text-gray-800">{formData.deviceModel}</span></div><div className="flex justify-between"><span className="text-gray-500">Data Ent:</span> <span className="font-bold text-gray-800">{formatDateBR(formData.dateEntry)}</span></div></div></div>
+                                            <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100"><h4 className="text-xs font-bold text-gray-400 uppercase mb-3">Dados do Aparelho</h4><div className="space-y-2 text-sm"><div className="flex justify-between"><span className="text-gray-500">Cliente:</span> <span className="font-bold text-gray-800">{formData.clientName}</span></div><div className="flex justify-between"><span className="text-gray-500">Telefone:</span> <span className="font-bold text-gray-800">{formData.clientPhone || '-'}</span></div><div className="flex justify-between"><span className="text-gray-500">Modelo:</span> <span className="font-bold text-gray-800">{formData.deviceModel}</span></div><div className="flex justify-between"><span className="text-gray-500">Data Ent:</span> <span className="font-bold text-gray-800">{formatDateBR(formData.dateEntry)}</span></div></div></div>
                                             <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100"><h4 className="text-xs font-bold text-gray-400 uppercase mb-3">Defeito e Serviço</h4><p className="text-gray-800 font-medium mb-2"><span className="text-gray-400 text-xs block">Defeito:</span>{formData.problem}</p>{formData.serviceDone && <p className="text-gray-800 font-medium"><span className="text-gray-400 text-xs block">Serviço:</span>{formData.serviceDone}</p>}</div>
                                             <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100"><h4 className="text-xs font-bold text-gray-400 uppercase mb-3">Custos Extras / Brindes</h4>{formData.extraCosts && formData.extraCosts.length > 0 ? (<ul className="space-y-1">{formData.extraCosts.map((extra, idx) => (<li key={idx} className="flex justify-between text-sm"><span>{extra.description}</span><span className="font-bold text-red-500">- {formatCurrency(extra.amount)}</span></li>))}</ul>) : <span className="text-sm text-gray-400">Nenhum custo extra.</span>}</div>
                                             <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100"><h4 className="text-xs font-bold text-gray-400 uppercase mb-3">Pagamentos</h4><div className="flex justify-between items-center mb-2"><span className="text-gray-500">Valor Total:</span><span className="text-xl font-bold text-green-700">{formatCurrency(formData.price)}</span></div>{formData.payments && formData.payments.map((p, i) => (<div key={i} className="flex justify-between text-sm text-gray-600"><span>{p.method}</span><span>{formatCurrency(p.amount)}</span></div>))}</div>
                                         </div>
                                     ) : (
                                         <form id="osForm" className="space-y-6">
-                                            <section className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 space-y-3"><h4 className="text-xs font-bold text-blue-500 uppercase tracking-wider mb-2 flex items-center gap-1"><User size={12}/> Cliente e Prazos</h4><input className="w-full bg-gray-50 border-gray-200 border p-3 rounded-xl font-medium outline-none" value={formData.clientName} onChange={e => setFormData({...formData, clientName: e.target.value})} placeholder="Nome do Cliente" /><div className="grid grid-cols-2 gap-3"><div><label className="text-[10px] font-bold text-gray-400 uppercase">Entrada</label><input type="date" className="w-full bg-gray-50 border-gray-200 border p-3 rounded-xl font-medium outline-none text-sm" value={formData.dateEntry} onChange={e => setFormData({...formData, dateEntry: e.target.value})} /></div><div><label className="text-[10px] font-bold text-gray-400 uppercase">Saída</label><input type="date" className="w-full bg-gray-50 border-gray-200 border p-3 rounded-xl font-medium outline-none text-sm" value={formData.dateExit} onChange={e => setFormData({...formData, dateExit: e.target.value})} /></div></div><div className="grid grid-cols-2 gap-3"><select className="bg-gray-50 border-gray-200 border p-3 rounded-xl font-medium outline-none" value={formData.deviceType} onChange={e => setFormData({...formData, deviceType: e.target.value})}><option>Smartphone</option><option>Notebook</option><option>Tablet</option><option>Console</option></select><input className="bg-gray-50 border-gray-200 border p-3 rounded-xl font-medium outline-none" value={formData.deviceModel} onChange={e => setFormData({...formData, deviceModel: e.target.value})} placeholder="Modelo (Ex: S20)" /></div></section>
+                                            <section className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 space-y-3"><h4 className="text-xs font-bold text-blue-500 uppercase tracking-wider mb-2 flex items-center gap-1"><User size={12}/> Cliente e Prazos</h4><input className="w-full bg-gray-50 border-gray-200 border p-3 rounded-xl font-medium outline-none" value={formData.clientName} onChange={e => setFormData({...formData, clientName: e.target.value})} placeholder="Nome do Cliente" /><div className="relative"><Phone className="absolute left-3 top-3 text-gray-400" size={18} /><input type="tel" className="w-full bg-gray-50 border-gray-200 border p-3 pl-10 rounded-xl font-medium outline-none" value={formData.clientPhone} onChange={e => setFormData({...formData, clientPhone: e.target.value})} placeholder="Telefone (WhatsApp)" /></div><div className="grid grid-cols-2 gap-3"><div><label className="text-[10px] font-bold text-gray-400 uppercase">Entrada</label><input type="date" className="w-full bg-gray-50 border-gray-200 border p-3 rounded-xl font-medium outline-none text-sm" value={formData.dateEntry} onChange={e => setFormData({...formData, dateEntry: e.target.value})} /></div><div><label className="text-[10px] font-bold text-gray-400 uppercase">Saída</label><input type="date" className="w-full bg-gray-50 border-gray-200 border p-3 rounded-xl font-medium outline-none text-sm" value={formData.dateExit} onChange={e => setFormData({...formData, dateExit: e.target.value})} /></div></div><div className="grid grid-cols-2 gap-3"><select className="bg-gray-50 border-gray-200 border p-3 rounded-xl font-medium outline-none" value={formData.deviceType} onChange={e => setFormData({...formData, deviceType: e.target.value})}><option>Smartphone</option><option>Notebook</option><option>Tablet</option><option>Console</option></select><input className="bg-gray-50 border-gray-200 border p-3 rounded-xl font-medium outline-none" value={formData.deviceModel} onChange={e => setFormData({...formData, deviceModel: e.target.value})} placeholder="Modelo (Ex: S20)" /></div></section>
                                             <section className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100"><h4 className="text-xs font-bold text-orange-500 uppercase tracking-wider mb-3 flex items-center gap-1"><AlertTriangle size={12}/> Estado ao Chegar</h4><div className="grid grid-cols-3 gap-2"><CheckItem label="Não Liga" icon={Power} checked={formData.checklist?.wontTurnOn} onChange={v => setFormData({...formData, checklist: {...formData.checklist, wontTurnOn: v}})} /><CheckItem label="Tela Queb." icon={Smartphone} checked={formData.checklist?.screenBroken} onChange={v => setFormData({...formData, checklist: {...formData.checklist, screenBroken: v}})} /><CheckItem label="Tampa Queb." icon={ShieldAlert} checked={formData.checklist?.backBroken} onChange={v => setFormData({...formData, checklist: {...formData.checklist, backBroken: v}})} /><CheckItem label="Não Carrega" icon={BatteryCharging} checked={formData.checklist?.notCharging} onChange={v => setFormData({...formData, checklist: {...formData.checklist, notCharging: v}})} /><CheckItem label="Sem Wifi" icon={Wifi} checked={formData.checklist?.noWifi} onChange={v => setFormData({...formData, checklist: {...formData.checklist, noWifi: v}})} /><CheckItem label="Câmera Ruim" icon={Camera} checked={formData.checklist?.cameraBad} onChange={v => setFormData({...formData, checklist: {...formData.checklist, cameraBad: v}})} /></div></section>
                                             <section className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100"><h4 className="text-xs font-bold text-purple-500 uppercase tracking-wider mb-3 flex items-center gap-1"><Lock size={12}/> Desbloqueio</h4><div className="flex bg-gray-50 p-1 rounded-lg mb-3"><button type="button" onClick={() => setFormData({...formData, passwordType: 'none'})} className={`flex-1 py-1.5 text-xs font-bold rounded-md ${formData.passwordType === 'none' ? 'bg-white shadow text-gray-800' : 'text-gray-400'}`}>Sem Senha</button><button type="button" onClick={() => setFormData({...formData, passwordType: 'text'})} className={`flex-1 py-1.5 text-xs font-bold rounded-md ${formData.passwordType === 'text' ? 'bg-white shadow text-gray-800' : 'text-gray-400'}`}>Pin/Texto</button><button type="button" onClick={() => setFormData({...formData, passwordType: 'pattern'})} className={`flex-1 py-1.5 text-xs font-bold rounded-md ${formData.passwordType === 'pattern' ? 'bg-white shadow text-gray-800' : 'text-gray-400'}`}>Padrão</button></div>{formData.passwordType === 'text' && (<input className="w-full bg-gray-50 border-gray-200 border p-3 rounded-xl font-medium outline-none" value={formData.passwordText} onChange={e => setFormData({...formData, passwordText: e.target.value})} placeholder="Digite a senha..." />)}{formData.passwordType === 'pattern' && (<PatternLock value={formData.passwordPattern} onChange={v => setFormData({...formData, passwordPattern: v})} />)}</section>
                                             <section className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 space-y-3"><h4 className="text-xs font-bold text-green-600 uppercase tracking-wider mb-2 flex items-center gap-1"><DollarSign size={12}/> Financeiro e Garantia</h4><div><label className="text-[10px] font-bold text-gray-400 uppercase">Garantia (dias)</label><select className="w-full bg-gray-50 border-gray-200 border p-3 rounded-xl font-medium outline-none" value={formData.warrantyDays} onChange={e => setFormData({...formData, warrantyDays: e.target.value})}><option value="0">Sem Garantia</option><option value="7">7 Dias</option><option value="30">30 Dias</option><option value="90">90 Dias (Padrão)</option><option value="180">180 Dias</option></select></div><div><label className="text-[10px] font-bold text-gray-400 uppercase">Defeito</label><textarea className="w-full bg-gray-50 border-gray-200 border p-3 rounded-xl font-medium outline-none resize-none text-sm" rows="2" value={formData.problem} onChange={e => setFormData({...formData, problem: e.target.value})} placeholder="Relato do cliente"></textarea></div><div><label className="text-[10px] font-bold text-gray-400 uppercase">Serviço Realizado</label><textarea className="w-full bg-gray-50 border-gray-200 border p-3 rounded-xl font-medium outline-none resize-none text-sm" rows="2" value={formData.serviceDone} onChange={e => setFormData({...formData, serviceDone: e.target.value})} placeholder="O que foi feito?"></textarea></div><div className="grid grid-cols-2 gap-3 pt-2"><div><label className="text-[10px] font-bold text-gray-400 uppercase">Valor Total (R$)</label><input type="number" step="0.01" className="w-full bg-green-50 border-green-100 border p-3 rounded-xl font-bold text-green-700 outline-none text-lg" value={formData.price} onChange={e => setFormData({...formData, price: e.target.value})} placeholder="0.00" /></div><div><label className="text-[10px] font-bold text-gray-400 uppercase">Custo Peça (R$)</label><input type="number" step="0.01" className="w-full bg-red-50 border-red-100 border p-3 rounded-xl font-bold text-red-700 outline-none text-lg" value={formData.cost} onChange={e => setFormData({...formData, cost: e.target.value})} placeholder="0.00" /></div></div><div className="pt-2 border-t border-gray-100"><label className="text-[10px] font-bold text-gray-400 uppercase mb-2 block flex items-center gap-1"><Gift size={10}/> Custos Extras / Brindes</label><div className="space-y-2 mb-3">{(formData.extraCosts || []).map((extra, idx) => (<div key={idx} className="flex justify-between items-center bg-gray-50 p-2 rounded-lg text-sm"><span>{extra.description}</span><div className="flex items-center gap-3"><span className="font-bold text-red-500">- {formatCurrency(extra.amount)}</span><button onClick={() => removeExtraCost(idx)} type="button" className="text-gray-400"><Trash2 size={14}/></button></div></div>))}</div><div className="flex gap-2"><input type="text" className="flex-1 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-xs outline-none" placeholder="Ex: Película" value={newExtraCostDesc} onChange={e => setNewExtraCostDesc(e.target.value)} /><input type="number" step="0.01" className="w-20 bg-gray-50 border border-gray-200 rounded-lg px-2 py-2 text-xs outline-none" placeholder="Valor" value={newExtraCostAmount} onChange={e => setNewExtraCostAmount(e.target.value)} /><button type="button" onClick={addExtraCost} className="bg-red-500 text-white p-2 rounded-lg"><Plus size={16}/></button></div></div><div className="pt-2 border-t border-gray-100"><label className="text-[10px] font-bold text-gray-400 uppercase mb-2 block">Pagamentos</label><div className="space-y-2 mb-3">{(formData.payments || []).map((pay, idx) => (<div key={idx} className="flex justify-between items-center bg-gray-50 p-2 rounded-lg text-sm"><div className="flex items-center gap-2">{pay.method === 'Pix' ? <Share2 size={14} className="text-teal-500"/> : pay.method === 'Dinheiro' ? <Banknote size={14} className="text-green-500"/> : <CreditCard size={14} className="text-blue-500"/>}<span>{pay.method}</span></div><div className="flex items-center gap-3"><span className="font-bold">{formatCurrency(pay.amount)}</span><button onClick={() => removePayment(idx)} type="button" className="text-red-400"><Trash2 size={14}/></button></div></div>))}</div><div className="flex gap-2"><select className="bg-gray-50 border border-gray-200 rounded-lg px-2 text-xs outline-none w-24" value={newPaymentMethod} onChange={e => setNewPaymentMethod(e.target.value)}><option>Pix</option><option>Dinheiro</option><option>Crédito</option><option>Débito</option></select><input type="number" step="0.01" className="flex-1 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none" placeholder="Valor" value={newPaymentAmount} onChange={e => setNewPaymentAmount(e.target.value)} /><button type="button" onClick={addPayment} className="bg-blue-600 text-white p-2 rounded-lg"><Plus size={16}/></button></div><div className="mt-3 flex justify-between items-center bg-gray-50 p-3 rounded-xl"><span className="text-xs font-bold text-gray-500 uppercase">Falta Pagar</span><span className={`text-lg font-bold ${((parseFloat(formData.price) || 0) - (formData.payments || []).reduce((acc, curr) => acc + (curr.amount || 0), 0)) > 0 ? 'text-red-500' : 'text-green-600'}`}>{formatCurrency((parseFloat(formData.price) || 0) - (formData.payments || []).reduce((acc, curr) => acc + (curr.amount || 0), 0))}</span></div></div></section>
@@ -503,7 +469,7 @@
                     {receiptData && (
                         <div id="receipt-overlay" className="fixed inset-0 z-[100] bg-white flex flex-col animate-in">
                             <div className="no-print p-4 bg-slate-900 text-white flex justify-between items-center shadow-lg"><h3 className="font-bold flex items-center gap-2"><FileText size={20}/> Visualizar Recibo</h3><div className="flex gap-3"><button onClick={printReceipt} className="bg-green-600 px-4 py-2 rounded-lg font-bold text-sm shadow-sm flex items-center gap-2 active:scale-95"><Printer size={16}/> Imprimir</button><button onClick={closeReceipt} className="bg-slate-700 px-3 py-2 rounded-lg text-sm font-bold active:scale-95"><X size={18}/></button></div></div>
-                            <div className="flex-1 overflow-y-auto bg-gray-100 p-4 flex justify-center"><div id="receipt-content" className="bg-white w-full max-w-[350px] shadow-xl p-6 text-black font-mono text-sm leading-relaxed h-fit border border-gray-200"><h2 className="text-center font-bold text-xl mb-1 uppercase tracking-widest">SmartOS</h2><p className="text-center text-xs text-gray-500 mb-4">Assistência Técnica Especializada</p><div className="border-b-2 border-dashed border-gray-300 my-4"></div><div className="flex justify-between font-bold text-lg mb-2"><span>OS #{receiptData.osNumber}</span><span>{formatDateBR(new Date().toISOString().split('T')[0])}</span></div><div className="space-y-1 mb-4"><p><span className="font-bold">CLIENTE:</span> {receiptData.clientName}</p><p><span className="font-bold">APARELHO:</span> {receiptData.deviceType} {receiptData.deviceModel}</p><p><span className="font-bold">DEFEITO:</span> {receiptData.problem}</p>{Object.values(receiptData.checklist || {}).some(x=>x) && (<p className="text-xs mt-2"><span className="font-bold">OBS. ENTRADA:</span> {Object.entries(receiptData.checklist).filter(([_,v])=>v).map(([k])=>k === 'wontTurnOn'?'Não Liga':k==='screenBroken'?'Tela Queb.':k==='backBroken'?'Tampa Queb.':k==='notCharging'?'Não Carrega':k==='noWifi'?'Sem Wifi':'Câmera Ruim').join(', ')}</p>)}</div><div className="border-b-2 border-dashed border-gray-300 my-4"></div><div className="space-y-2"><div className="flex justify-between"><span>Total Serviço</span> <span className="font-bold">R$ {parseFloat(receiptData.price || 0).toFixed(2)}</span></div><div className="flex justify-between text-gray-500"><span>Descontos/Pagos</span> <span>- R$ {(receiptData.payments || []).reduce((a,c)=>a+c.amount,0).toFixed(2)}</span></div><div className="border-t border-gray-200 my-1"></div><div className="flex justify-between text-lg font-bold"><span>A PAGAR</span> <span>R$ {(parseFloat(receiptData.price || 0) - (receiptData.payments || []).reduce((a,c)=>a+c.amount,0)).toFixed(2)}</span></div></div><div className="border-b-2 border-dashed border-gray-300 my-4"></div><div className="text-[10px] text-justify text-gray-500 leading-tight"><p className="font-bold mb-1">TERMOS DE GARANTIA:</p><p>1. Garantia de <span className="font-bold text-black">{receiptData.warrantyDays || 90} dias</span> válida até {getWarrantyInfo(receiptData.dateExit || new Date().toISOString(), receiptData.warrantyDays || 90)?.expiryDate}.</p><p>2. A garantia não cobre danos causados por mau uso, contato com líquidos ou quedas.</p><p>3. Aparelhos não retirados em até 90 dias serão vendidos para custeio (Art. 1.275 CC).</p></div><div className="mt-12 border-t border-black pt-2 text-center text-xs">Assinatura do Cliente</div><p className="text-center mt-6 font-bold text-xs">Obrigado pela preferência!</p></div></div>
+                            <div className="flex-1 overflow-y-auto bg-gray-100 p-4 flex justify-center"><div id="receipt-content" className="bg-white w-full max-w-[350px] shadow-xl p-6 text-black font-mono text-sm leading-relaxed h-fit border border-gray-200"><h2 className="text-center font-bold text-xl mb-1 uppercase tracking-widest">SmartOS</h2><p className="text-center text-xs text-gray-500 mb-4">Assistência Técnica Especializada</p><div className="border-b-2 border-dashed border-gray-300 my-4"></div><div className="flex justify-between font-bold text-lg mb-2"><span>OS #{receiptData.osNumber}</span><span>{formatDateBR(new Date().toISOString().split('T')[0])}</span></div><div className="space-y-1 mb-4"><p><span className="font-bold">CLIENTE:</span> {receiptData.clientName}</p><p><span className="font-bold">TELEFONE:</span> {receiptData.clientPhone || 'N/A'}</p><p><span className="font-bold">APARELHO:</span> {receiptData.deviceType} {receiptData.deviceModel}</p><p><span className="font-bold">DEFEITO:</span> {receiptData.problem}</p>{Object.values(receiptData.checklist || {}).some(x=>x) && (<p className="text-xs mt-2"><span className="font-bold">OBS. ENTRADA:</span> {Object.entries(receiptData.checklist).filter(([_,v])=>v).map(([k])=>k === 'wontTurnOn'?'Não Liga':k==='screenBroken'?'Tela Queb.':k==='backBroken'?'Tampa Queb.':k==='notCharging'?'Não Carrega':k==='noWifi'?'Sem Wifi':'Câmera Ruim').join(', ')}</p>)}</div><div className="border-b-2 border-dashed border-gray-300 my-4"></div><div className="space-y-2"><div className="flex justify-between"><span>Total Serviço</span> <span className="font-bold">R$ {parseFloat(receiptData.price || 0).toFixed(2)}</span></div><div className="flex justify-between text-gray-500"><span>Descontos/Pagos</span> <span>- R$ {(receiptData.payments || []).reduce((a,c)=>a+c.amount,0).toFixed(2)}</span></div><div className="border-t border-gray-200 my-1"></div><div className="flex justify-between text-lg font-bold"><span>A PAGAR</span> <span>R$ {(parseFloat(receiptData.price || 0) - (receiptData.payments || []).reduce((a,c)=>a+c.amount,0)).toFixed(2)}</span></div></div><div className="border-b-2 border-dashed border-gray-300 my-4"></div><div className="text-[10px] text-justify text-gray-500 leading-tight"><p className="font-bold mb-1">TERMOS DE GARANTIA:</p><p>1. Garantia de <span className="font-bold text-black">{receiptData.warrantyDays || 90} dias</span> válida até {getWarrantyInfo(receiptData.dateExit || new Date().toISOString(), receiptData.warrantyDays || 90)?.expiryDate}.</p><p>2. A garantia não cobre danos causados por mau uso, contato com líquidos ou quedas.</p><p>3. Aparelhos não retirados em até 90 dias serão vendidos para custeio (Art. 1.275 CC).</p></div><div className="mt-12 border-t border-black pt-2 text-center text-xs">Assinatura do Cliente</div><p className="text-center mt-6 font-bold text-xs">Obrigado pela preferência!</p></div></div>
                         </div>
                     )}
                 </div>
