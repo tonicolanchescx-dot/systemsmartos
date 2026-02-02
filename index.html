@@ -203,6 +203,11 @@
             const [orders, setOrders] = useState([]);
             const [filteredOrders, setFilteredOrders] = useState([]);
             const [searchTerm, setSearchTerm] = useState('');
+            // Filtro de período na aba ORDENS
+            const [ordersTimeFilter, setOrdersTimeFilter] = useState('month');
+            const [ordersPeriodOffset, setOrdersPeriodOffset] = useState(0);
+            const [ordersDateField, setOrdersDateField] = useState('dateEntry'); // 'dateEntry' (entrada) ou 'dateExit' (saída)
+            useEffect(() => { setOrdersPeriodOffset(0); }, [ordersTimeFilter, ordersDateField]);
             const [timeFilter, setTimeFilter] = useState('month');
             const [periodOffset, setPeriodOffset] = useState(0); // 0 = atual, -1 = anterior, +1 = próximo
             useEffect(() => { setPeriodOffset(0); }, [timeFilter]); 
@@ -263,9 +268,64 @@
             }, [user, isAdmin]);
 
             useEffect(() => {
-                if (searchTerm === '') setFilteredOrders(orders);
-                else { const t = searchTerm.toLowerCase(); setFilteredOrders(orders.filter(o => o.clientName.toLowerCase().includes(t) || o.deviceModel.toLowerCase().includes(t) || (o.osNumber && o.osNumber.toString().includes(t)))); }
-            }, [searchTerm, orders]);
+                // Primeiro filtra por PERÍODO (aba Ordens)
+                const today = new Date(); today.setHours(0,0,0,0);
+
+                const addDays = (d, days) => { const x = new Date(d); x.setDate(x.getDate() + days); return x; };
+                const addMonths = (d, months) => { const x = new Date(d); x.setMonth(x.getMonth() + months); return x; };
+                const addYears = (d, years) => { const x = new Date(d); x.setFullYear(x.getFullYear() + years); return x; };
+
+                const startOfDay = (d) => { const x = new Date(d); x.setHours(0,0,0,0); return x; };
+                const startOfWeek = (d) => { const x = startOfDay(d); const dow = x.getDay(); x.setDate(x.getDate() - dow); return x; };
+                const startOfMonth = (d) => new Date(d.getFullYear(), d.getMonth(), 1);
+                const startOfYear = (d) => new Date(d.getFullYear(), 0, 1);
+
+                let start, end;
+
+                if (ordersTimeFilter === 'day') {
+                    const base = addDays(today, ordersPeriodOffset);
+                    start = startOfDay(base);
+                    end = addDays(start, 1);
+                } else if (ordersTimeFilter === 'week') {
+                    const base = addDays(today, ordersPeriodOffset * 7);
+                    start = startOfWeek(base);
+                    end = addDays(start, 7);
+                } else if (ordersTimeFilter === 'year') {
+                    const base = addYears(today, ordersPeriodOffset);
+                    start = startOfYear(base);
+                    end = addYears(start, 1);
+                } else {
+                    const base = addMonths(today, ordersPeriodOffset);
+                    start = startOfMonth(base);
+                    end = addMonths(start, 1);
+                }
+
+                const periodFiltered = orders.filter(o => {
+                    const ds = o[ordersDateField];
+                    if (!ds) return false;
+                    const parts = (ds || '').split('-').map(Number);
+                    if (parts.length !== 3) return false;
+                    const [y, m, d] = parts;
+                    if (!y || !m || !d) return false;
+                    const dt = new Date(y, m - 1, d);
+                    dt.setHours(12,0,0,0);
+                    return dt >= start && dt < end;
+                });
+
+                // Depois filtra por busca
+                if (searchTerm === '') {
+                    setFilteredOrders(periodFiltered);
+                } else {
+                    const t = searchTerm.toLowerCase();
+                    setFilteredOrders(
+                        periodFiltered.filter(o =>
+                            (o.clientName || '').toLowerCase().includes(t) ||
+                            (o.deviceModel || '').toLowerCase().includes(t) ||
+                            (o.osNumber && o.osNumber.toString().includes(t))
+                        )
+                    );
+                }
+            }, [searchTerm, orders, ordersTimeFilter, ordersPeriodOffset, ordersDateField]);
 
             const showNotification = (msg, type = 'success') => { setNotification({ msg, type }); setTimeout(() => setNotification(null), 4000); };
             
@@ -356,7 +416,47 @@
             const formatCurrency = (val) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(parseFloat(val || 0));
             const formatDateBR = (dateString) => { if(!dateString) return '--/--'; const [y, m, d] = dateString.split('-'); return `${d}/${m}/${y}`; };
 
-            const stats = useMemo(() => {
+            
+            const getOrdersPeriodLabel = () => {
+                const today = new Date(); today.setHours(0,0,0,0);
+                const addDays = (d, days) => { const x = new Date(d); x.setDate(x.getDate() + days); return x; };
+                const addMonths = (d, months) => { const x = new Date(d); x.setMonth(x.getMonth() + months); return x; };
+                const addYears = (d, years) => { const x = new Date(d); x.setFullYear(x.getFullYear() + years); return x; };
+
+                const startOfDay = (d) => { const x = new Date(d); x.setHours(0,0,0,0); return x; };
+                const startOfWeek = (d) => { const x = startOfDay(d); const dow = x.getDay(); x.setDate(x.getDate() - dow); return x; };
+                const startOfMonth = (d) => new Date(d.getFullYear(), d.getMonth(), 1);
+                const startOfYear = (d) => new Date(d.getFullYear(), 0, 1);
+
+                let start, end, label;
+
+                if (ordersTimeFilter === 'day') {
+                    const base = addDays(today, ordersPeriodOffset);
+                    start = startOfDay(base);
+                    end = addDays(start, 1);
+                    label = start.toLocaleDateString('pt-BR');
+                } else if (ordersTimeFilter === 'week') {
+                    const base = addDays(today, ordersPeriodOffset * 7);
+                    start = startOfWeek(base);
+                    end = addDays(start, 7);
+                    const fmt = (dt) => dt.toLocaleDateString('pt-BR');
+                    label = `${fmt(start)} – ${fmt(addDays(end, -1))}`;
+                } else if (ordersTimeFilter === 'year') {
+                    const base = addYears(today, ordersPeriodOffset);
+                    start = startOfYear(base);
+                    end = addYears(start, 1);
+                    label = `${start.getFullYear()}`;
+                } else {
+                    const base = addMonths(today, ordersPeriodOffset);
+                    start = startOfMonth(base);
+                    end = addMonths(start, 1);
+                    label = start.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+                    label = label.charAt(0).toUpperCase() + label.slice(1);
+                }
+
+                return label;
+            };
+const stats = useMemo(() => {
                 const today = new Date();
                 today.setHours(0,0,0,0);
 
@@ -535,6 +635,62 @@ if (loading) return <div className="min-h-screen flex items-center justify-cente
                                 <div className="sticky top-0 z-10 bg-gray-50 pb-4">
                                     <div className="flex gap-2 mb-4">
                                         <div className="relative flex-1"><Search className="absolute left-3 top-3 text-gray-400" size={18}/><input className="w-full bg-white border-none shadow-sm rounded-xl py-3 pl-10 pr-4 text-sm font-medium outline-none" placeholder="Buscar..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} /></div>
+                                    <div className="bg-white p-3 rounded-2xl border border-gray-200 shadow-sm">
+                                        <div className="flex items-center justify-between mb-2">
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Base</span>
+                                                <select
+                                                    className="bg-gray-50 border border-gray-200 rounded-lg px-2 py-1 text-xs font-bold outline-none"
+                                                    value={ordersDateField}
+                                                    onChange={(e) => setOrdersDateField(e.target.value)}
+                                                >
+                                                    <option value="dateEntry">Entrada</option>
+                                                    <option value="dateExit">Saída</option>
+                                                </select>
+                                            </div>
+                                            <div className="text-[10px] font-bold text-gray-500">
+                                                {filteredOrders.length} ordens no período
+                                            </div>
+                                        </div>
+
+                                        <div className="flex bg-gray-50 p-1 rounded-xl border border-gray-100 overflow-x-auto mb-2">
+                                            {[{id:'day',l:'Dia'},{id:'week',l:'Semana'},{id:'month',l:'Mês'},{id:'year',l:'Ano'}].map(f=>(
+                                                <button key={f.id} onClick={()=>setOrdersTimeFilter(f.id)} className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold whitespace-nowrap ${ordersTimeFilter===f.id?'bg-slate-800 text-white':'text-gray-500'}`}>{f.l}</button>
+                                            ))}
+                                        </div>
+
+                                        <div className="flex items-center justify-between">
+                                            <button
+                                                onClick={() => setOrdersPeriodOffset(o => o - 1)}
+                                                className="px-3 py-2 rounded-xl bg-slate-900 text-white font-bold text-sm active:scale-95"
+                                                aria-label="Período anterior"
+                                            >
+                                                ‹
+                                            </button>
+
+                                            <div className="text-center">
+                                                <div className="text-[10px] uppercase tracking-wider text-gray-400 font-bold">Período</div>
+                                                <div className="font-extrabold text-slate-800">{getOrdersPeriodLabel()}</div>
+                                                {ordersPeriodOffset !== 0 && (
+                                                    <button
+                                                        onClick={() => setOrdersPeriodOffset(0)}
+                                                        className="text-xs font-bold text-blue-600 mt-1"
+                                                    >
+                                                        Voltar para o atual
+                                                    </button>
+                                                )}
+                                            </div>
+
+                                            <button
+                                                onClick={() => setOrdersPeriodOffset(o => o + 1)}
+                                                className="px-3 py-2 rounded-xl bg-slate-900 text-white font-bold text-sm active:scale-95"
+                                                aria-label="Próximo período"
+                                            >
+                                                ›
+                                            </button>
+                                        </div>
+                                    </div>
+
                                         <Button onClick={openNewOS} className="!px-3 !rounded-xl shadow-sm"><Plus size={20} /></Button>
                                     </div>
                                 </div>
