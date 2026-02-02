@@ -4,9 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>SmartOS - Enterprise V17</title>
+    <meta name="google" content="notranslate">
+    <meta name="googlebot" content="notranslate">
     
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin="anonymous"></script>
 
     <style>
         .animate-in { animation: fadeIn 0.3s ease-in; }
@@ -34,27 +36,99 @@
 <body class="bg-gray-100 text-gray-800 font-sans selection:bg-blue-100">
     <div id="root"></div>
 
-    <script type="text/babel" data-type="module">
-        import React, { useState, useEffect, useMemo } from 'https://esm.sh/react@18.2.0';
-        import { createRoot } from 'https://esm.sh/react-dom@18.2.0/client';
-        
-        import { 
-            LayoutDashboard, ClipboardList, Plus, Search, LogOut, Wrench, 
-            Smartphone, Laptop, DollarSign, CheckCircle2, Clock, AlertCircle, 
-            X, User, Save, Trash2, Edit, Lock, Mail, Eye, EyeOff, Calendar, Share2, AlertTriangle, 
+    <!-- Boot: carrega deps via ESM e executa o app (JSX) via Babel preset React classic -->
+    <script type="module">
+      const log = (()=>{});
+      try {
+        log('Carregando dependências…');
+
+        const ReactMod = await import('https://esm.sh/react@18.2.0');
+        const React = ReactMod.default ?? ReactMod;
+
+        const ReactDOMClient = await import('https://esm.sh/react-dom@18.2.0/client');
+
+        const Lucide = await import('https://esm.sh/lucide-react@0.263.1');
+
+        const FBApp = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js');
+        const FBAuth = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js');
+        const FBFS   = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
+
+        window.__deps = {
+          React,
+          ...React,
+          createRoot: ReactDOMClient.createRoot,
+          Lucide,
+          firebase: {
+            ...FBApp,
+            ...FBAuth,
+            ...FBFS
+          }
+        };
+
+        log('Deps OK ✅');
+
+        // Espera Babel carregar
+        if (!window.Babel) {
+          log('Babel não carregou ❌');
+          throw new Error('Babel ausente');
+        }
+
+        const src = document.getElementById('app-src').textContent;
+
+        // Compila JSX -> React.createElement (runtime classic)
+        let compiled;
+        try {
+          compiled = window.Babel.transform(src, {
+          // ✅ env + react (corrige sintaxes modernas e evita bug targets.esmodules)
+          presets: [
+            [window.Babel.availablePresets['env'], { targets: { esmodules: true } }],
+            [window.Babel.availablePresets['react'], { runtime: 'classic' }]
+          ],
+          sourceType: 'script'
+        }).code;
+        } catch (err) {
+          log('BABEL ERROR ❌: ' + (err?.message || err));
+          if (err?.codeFrame) log(err.codeFrame);
+          throw err;
+        }
+
+        log('JSX compilado ✅');
+
+        // Executa o código compilado em um escopo com deps
+        const deps = window.__deps;
+        const fn = new Function('deps', `
+          const React = deps.React;
+          const { useState, useEffect, useMemo } = deps;
+          const createRoot = deps.createRoot;
+
+          const Lucide = deps.Lucide;
+          const {
+            LayoutDashboard, ClipboardList, Plus, Search, LogOut, Wrench,
+            Smartphone, Laptop, DollarSign, CheckCircle2, Clock, AlertCircle,
+            X, User, Save, Trash2, Edit, Lock, Mail, Eye, EyeOff, Calendar, Share2, AlertTriangle,
             Power, BatteryCharging, Wifi, Camera, ShieldAlert, TrendingUp, Store, Megaphone, Hammer, CreditCard, Banknote, PenSquare, Gift, Printer, FileText, ShieldCheck, Timer, Users, UserPlus, Phone, Briefcase
-        } from 'https://esm.sh/lucide-react@0.263.1';
+          } = Lucide;
 
-        import { initializeApp, deleteApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-        import { 
-            getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut 
-        } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
-        import { 
-            getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, 
-            onSnapshot, query, serverTimestamp, orderBy 
-        } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+          const {
+            initializeApp, deleteApp,
+            getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut,
+            getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, serverTimestamp, orderBy
+          } = deps.firebase;
 
-        // --- CONFIGURAÇÃO (CLIENTE-SMART) ---
+          ${compiled}
+        `);
+        fn(deps);
+
+        log('App executado ✅');
+      } catch (e) {
+        const msg = (e && (e.stack || e.message)) ? (e.stack || e.message) : String(e);
+        (window.__debugLog || console.error)('BOOT ERROR ❌: ' + msg);
+        console.error(e);
+      }
+    </script>
+
+    <script id="app-src" type="text/plain">
+// --- CONFIGURAÇÃO (CLIENTE-SMART) ---
         const firebaseConfig = {
           apiKey: "AIzaSyBhnLc-4Be_09G4IWdUhSrthg7sZjlRI78",
           authDomain: "cliente-smart.firebaseapp.com",
@@ -505,5 +579,6 @@
         const root = createRoot(document.getElementById('root'));
         root.render(<SmartOSApp />);
     </script>
+
 </body>
 </html>
