@@ -49,6 +49,8 @@
 
         const Lucide = await import('https://esm.sh/lucide-react@0.263.1');
 
+        const ChartJS = await import('https://esm.sh/chart.js@4.4.1');
+
         const FBApp = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js');
         const FBAuth = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js');
         const FBFS   = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
@@ -58,6 +60,7 @@
           ...React,
           createRoot: ReactDOMClient.createRoot,
           Lucide,
+          ChartJS,
           firebase: {
             ...FBApp,
             ...FBAuth,
@@ -98,10 +101,11 @@
         const deps = window.__deps;
         const fn = new Function('deps', `
           const React = deps.React;
-          const { useState, useEffect, useMemo } = deps;
+          const { useState, useEffect, useMemo, useRef } = deps;
           const createRoot = deps.createRoot;
 
           const Lucide = deps.Lucide;
+          const ChartJS = deps.ChartJS;
           const {
             LayoutDashboard, ClipboardList, Plus, Search, LogOut, Wrench,
             Smartphone, Laptop, DollarSign, CheckCircle2, Clock, AlertCircle,
@@ -183,6 +187,90 @@
             if (!info) return null;
             return <div className={`flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded border ${info.isExpired ? 'bg-gray-100 text-gray-500 border-gray-200' : 'bg-emerald-50 text-emerald-600 border-emerald-200'}`}>{info.isExpired ? <Clock size={10}/> : <ShieldCheck size={10}/>}{info.label}</div>;
         };
+
+
+        const RevenueChart = ({ revenue = 0, cost = 0, extras = 0, profit = 0, periodLabel = '' }) => {
+            const canvasRef = useRef(null);
+            const chartRef = useRef(null);
+
+            useEffect(() => {
+                if (!canvasRef.current) return;
+                if (!ChartJS || !ChartJS.Chart) return;
+
+                const { Chart, registerables } = ChartJS;
+
+                // Registra módulos do Chart.js uma única vez
+                if (!window.__chartjs_registered) {
+                    try { Chart.register(...registerables); } catch (e) {}
+                    window.__chartjs_registered = true;
+                }
+
+                // Destroi gráfico anterior (evita duplicar)
+                if (chartRef.current) {
+                    try { chartRef.current.destroy(); } catch (e) {}
+                    chartRef.current = null;
+                }
+
+                chartRef.current = new Chart(canvasRef.current, {
+                    type: 'bar',
+                    data: {
+                        labels: ['Faturamento', 'Peças', 'Extras', 'Lucro'],
+                        datasets: [{
+                            label: 'R$',
+                            data: [revenue, cost, extras, profit]
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: {
+                                callbacks: {
+                                    label: (ctx) => {
+                                        const v = (ctx.parsed && typeof ctx.parsed.y === 'number') ? ctx.parsed.y : 0;
+                                        return ' ' + new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                ticks: {
+                                    callback: (value) => {
+                                        try { return Number(value).toLocaleString('pt-BR'); } catch (e) { return value; }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+
+                return () => {
+                    if (chartRef.current) {
+                        try { chartRef.current.destroy(); } catch (e) {}
+                        chartRef.current = null;
+                    }
+                };
+            }, [revenue, cost, extras, profit, periodLabel]);
+
+            return (
+                <div className="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm">
+                    <div className="flex items-center justify-between mb-3">
+                        <div>
+                            <div className="text-[10px] uppercase tracking-wider text-gray-400 font-bold">Gráfico do período</div>
+                            <div className="font-extrabold text-slate-800">{periodLabel || '-'}</div>
+                        </div>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Data Saída</span>
+                    </div>
+                    <div className="h-52">
+                        <canvas ref={canvasRef}></canvas>
+                    </div>
+                </div>
+            );
+        };
+
 
         const PatternLock = ({ value = [], onChange, readOnly = false }) => {
             const getCoords = (index) => { const col = index % 3; const row = Math.floor(index / 3); return { x: 30 + col * 60, y: 30 + row * 60 }; };
@@ -620,6 +708,7 @@ if (loading) return <div className="min-h-screen flex items-center justify-cente
                                         <p className="text-[10px] text-slate-500 mt-2 italic">*Baseado em {stats.completedInPeriod} ordens (Data Saída)</p>
                                     </div>
                                 </div>
+                                <RevenueChart revenue={stats.revenue} cost={stats.cost} extras={stats.extras} profit={stats.netProfit} periodLabel={stats.periodLabel} />
                                 <h3 className="font-bold text-gray-700 text-sm uppercase tracking-wide mt-2 ml-1">Destinação do Lucro</h3>
                                 <div className="grid grid-cols-2 gap-3">
                                     <div className="bg-white p-4 rounded-2xl border border-blue-100 shadow-sm"><span className="text-xs font-bold text-blue-500 block mb-1">LOJA (40%)</span><p className="text-xl font-bold text-gray-800">{formatCurrency(stats.split.store)}</p></div>
@@ -632,69 +721,94 @@ if (loading) return <div className="min-h-screen flex items-center justify-cente
 
                         {view === 'orders' && (
                             <div className="animate-in h-full flex flex-col">
-                                <div className="sticky top-0 z-10 bg-gray-50 pb-4">
-                                    <div className="flex gap-2 mb-4">
-                                        <div className="relative flex-1"><Search className="absolute left-3 top-3 text-gray-400" size={18}/><input className="w-full bg-white border-none shadow-sm rounded-xl py-3 pl-10 pr-4 text-sm font-medium outline-none" placeholder="Buscar..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} /></div>
-                                    <div className="bg-white p-3 rounded-2xl border border-gray-200 shadow-sm">
-                                        <div className="flex items-center justify-between mb-2">
-                                            <div className="flex items-center gap-2">
-                                                <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Base</span>
-                                                <select
-                                                    className="bg-gray-50 border border-gray-200 rounded-lg px-2 py-1 text-xs font-bold outline-none"
-                                                    value={ordersDateField}
-                                                    onChange={(e) => setOrdersDateField(e.target.value)}
-                                                >
-                                                    <option value="dateEntry">Entrada</option>
-                                                    <option value="dateExit">Saída</option>
-                                                </select>
-                                            </div>
-                                            <div className="text-[10px] font-bold text-gray-500">
-                                                {filteredOrders.length} ordens no período
-                                            </div>
-                                        </div>
+                                
+<div className="sticky top-0 z-10 bg-gray-50 pb-4">
+  <div className="space-y-3">
+    <div className="relative">
+      <Search className="absolute left-4 top-3.5 text-gray-400" size={20}/>
+      <input
+        className="w-full bg-white border border-gray-200 shadow-sm rounded-2xl py-3 pl-12 pr-4 text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500"
+        placeholder="Buscar por cliente, modelo ou OS..."
+        value={searchTerm}
+        onChange={e => setSearchTerm(e.target.value)}
+      />
+    </div>
 
-                                        <div className="flex bg-gray-50 p-1 rounded-xl border border-gray-100 overflow-x-auto mb-2">
-                                            {[{id:'day',l:'Dia'},{id:'week',l:'Semana'},{id:'month',l:'Mês'},{id:'year',l:'Ano'}].map(f=>(
-                                                <button key={f.id} onClick={()=>setOrdersTimeFilter(f.id)} className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold whitespace-nowrap ${ordersTimeFilter===f.id?'bg-slate-800 text-white':'text-gray-500'}`}>{f.l}</button>
-                                            ))}
-                                        </div>
+    <div className="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm space-y-4">
+      <div>
+        <p className="text-xs font-bold text-gray-400 uppercase mb-1">Base do Filtro</p>
+        <div className="flex gap-2">
+          {[{ id: 'dateEntry', label: 'Data de Entrada' }, { id: 'dateExit', label: 'Data de Saída' }].map(opt => (
+            <button
+              key={opt.id}
+              onClick={() => setOrdersDateField(opt.id)}
+              className={`flex-1 py-2 rounded-xl text-sm font-bold transition ${ordersDateField === opt.id ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-500'}`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </div>
 
-                                        <div className="flex items-center justify-between">
-                                            <button
-                                                onClick={() => setOrdersPeriodOffset(o => o - 1)}
-                                                className="px-3 py-2 rounded-xl bg-slate-900 text-white font-bold text-sm active:scale-95"
-                                                aria-label="Período anterior"
-                                            >
-                                                ‹
-                                            </button>
+      <div>
+        <p className="text-xs font-bold text-gray-400 uppercase mb-1">Período</p>
+        <div className="grid grid-cols-4 gap-2">
+          {[{id:'day',l:'Dia'},{id:'week',l:'Semana'},{id:'month',l:'Mês'},{id:'year',l:'Ano'}].map(f=>(
+            <button
+              key={f.id}
+              onClick={()=>setOrdersTimeFilter(f.id)}
+              className={`py-2 rounded-xl text-xs font-bold transition ${ordersTimeFilter===f.id?'bg-slate-900 text-white':'bg-gray-100 text-gray-500'}`}
+            >
+              {f.l}
+            </button>
+          ))}
+        </div>
+      </div>
 
-                                            <div className="text-center">
-                                                <div className="text-[10px] uppercase tracking-wider text-gray-400 font-bold">Período</div>
-                                                <div className="font-extrabold text-slate-800">{getOrdersPeriodLabel()}</div>
-                                                {ordersPeriodOffset !== 0 && (
-                                                    <button
-                                                        onClick={() => setOrdersPeriodOffset(0)}
-                                                        className="text-xs font-bold text-blue-600 mt-1"
-                                                    >
-                                                        Voltar para o atual
-                                                    </button>
-                                                )}
-                                            </div>
+      <div className="flex items-center justify-between bg-gray-50 p-3 rounded-xl">
+        <button
+          onClick={() => setOrdersPeriodOffset(o => o - 1)}
+          className="px-3 py-2 rounded-xl bg-slate-900 text-white font-bold active:scale-95"
+          aria-label="Período anterior"
+        >
+          ‹
+        </button>
 
-                                            <button
-                                                onClick={() => setOrdersPeriodOffset(o => o + 1)}
-                                                className="px-3 py-2 rounded-xl bg-slate-900 text-white font-bold text-sm active:scale-95"
-                                                aria-label="Próximo período"
-                                            >
-                                                ›
-                                            </button>
-                                        </div>
-                                    </div>
+        <div className="text-center">
+          <p className="text-xs font-bold text-gray-400 uppercase">Período Atual</p>
+          <p className="font-extrabold text-gray-800">{getOrdersPeriodLabel()}</p>
+          {ordersPeriodOffset !== 0 && (
+            <button
+              onClick={() => setOrdersPeriodOffset(0)}
+              className="text-xs font-bold text-blue-600 mt-1"
+            >
+              Voltar para hoje
+            </button>
+          )}
+        </div>
 
-                                        <Button onClick={openNewOS} className="!px-3 !rounded-xl shadow-sm"><Plus size={20} /></Button>
-                                    </div>
-                                </div>
-                                <div className="space-y-4 pb-20">
+        <button
+          onClick={() => setOrdersPeriodOffset(o => o + 1)}
+          className="px-3 py-2 rounded-xl bg-slate-900 text-white font-bold active:scale-95"
+          aria-label="Próximo período"
+        >
+          ›
+        </button>
+      </div>
+
+      <div className="text-center text-xs font-bold text-gray-500">
+        {filteredOrders.length} ordens encontradas
+      </div>
+    </div>
+
+    <div className="flex justify-end">
+      <Button onClick={openNewOS} className="!px-4 !py-3 !rounded-2xl shadow-sm">
+        <Plus size={20} /> Nova OS
+      </Button>
+    </div>
+  </div>
+</div>
+<div className="space-y-4 pb-20">
                                     {filteredOrders.map(order => (
                                         <div key={order.id} onClick={() => openViewOS(order)} className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 active:scale-[0.98] transition-transform relative">
                                             <div className="flex justify-between items-start mb-3">
