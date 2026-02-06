@@ -106,7 +106,7 @@
             LayoutDashboard, ClipboardList, Plus, Search, LogOut, Wrench,
             Smartphone, Laptop, DollarSign, CheckCircle2, Clock, AlertCircle,
             X, User, Save, Trash2, Edit, Lock, Mail, Eye, EyeOff, Calendar, Share2, AlertTriangle,
-            Power, BatteryCharging, Wifi, Camera, ShieldAlert, TrendingUp, Store, Megaphone, Hammer, CreditCard, Banknote, PenSquare, Gift, Printer, FileText, ShieldCheck, Timer, Users, UserPlus, Phone, Briefcase
+            Power, BatteryCharging, Wifi, Camera, ShieldAlert, TrendingUp, Store, Megaphone, Hammer, CreditCard, Banknote, PenSquare, Gift, Printer, FileText, Download, ShieldCheck, Timer, Users, UserPlus, Phone, Briefcase
           } = Lucide;
 
           const {
@@ -218,6 +218,8 @@
             const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
             const [itemToDelete, setItemToDelete] = useState(null);
             const [receiptData, setReceiptData] = useState(null);
+            const [isReportOpen, setIsReportOpen] = useState(false);
+            const [reportOptions, setReportOptions] = useState({ onlyCompleted: true });
             
             const [visiblePasswords, setVisiblePasswords] = useState({});
             const [isUserModalOpen, setIsUserModalOpen] = useState(false);
@@ -412,6 +414,187 @@
             const openReceipt = (os) => { setReceiptData(os); };
             const closeReceipt = () => { setReceiptData(null); };
             const printReceipt = () => { window.print(); };
+            const safeText = (s) => (s || '').toString().replace(/\s+/g, ' ').trim();
+
+            const calcReportTotals = (rows) => {
+                const completed = rows.filter(r => r.status === 'Concluído');
+                const revenueCompleted = completed.reduce((a, r) => a + (parseFloat(r.price)||0), 0);
+                const revenueAll = rows.reduce((a, r) => a + (parseFloat(r.price)||0), 0);
+                return {
+                    totalCount: rows.length,
+                    completedCount: completed.length,
+                    pendingCount: rows.length - completed.length,
+                    revenueCompleted,
+                    revenueAll
+                };
+            };
+
+            const buildCSV = (rows) => {
+                const headers = [
+                    'OS',
+                    'Cliente',
+                    'Telefone',
+                    'Modelo',
+                    'Status',
+                    'Entrada',
+                    'Saída',
+                    'Valor (R$)',
+                    'Custo (R$)',
+                    'Criado por'
+                ];
+                const lines = [headers.join(';')];
+
+                rows.forEach(r => {
+                    const line = [
+                        r.osNumber ?? '',
+                        safeText(r.clientName),
+                        safeText(r.clientPhone),
+                        safeText(`${r.deviceType || ''} ${r.deviceModel || ''}`.trim()),
+                        safeText(r.status),
+                        safeText(r.dateEntry),
+                        safeText(r.dateExit),
+                        (parseFloat(r.price)||0).toFixed(2).replace('.', ','),
+                        (parseFloat(r.cost)||0).toFixed(2).replace('.', ','),
+                        safeText(r.createdBy)
+                    ].map(v => `"${String(v).replace(/"/g,'""')}"`).join(';');
+
+                    lines.push(line);
+                });
+
+                return '\ufeff' + lines.join('\n'); // BOM p/ Excel
+            };
+
+            const downloadTextFile = (filename, content, mime = 'text/plain') => {
+                const blob = new Blob([content], { type: mime });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
+            };
+
+            const generateMonthlyReport = () => {
+                // Usa o período atual selecionado na aba ORDENS (filteredOrders já vem filtrado)
+                const baseLabel = ordersDateField === 'dateExit' ? 'Saída' : 'Entrada';
+                const periodLabel = getOrdersPeriodLabel();
+
+                const rowsBase = filteredOrders.slice().sort((a,b) => (b.osNumber||0) - (a.osNumber||0));
+                const rows = reportOptions.onlyCompleted ? rowsBase.filter(r => r.status === 'Concluído') : rowsBase;
+
+                const totals = calcReportTotals(rowsBase);
+                const totalsShown = calcReportTotals(rows);
+
+                // HTML do relatório (para impressão / visualização)
+                const nowStr = new Date().toLocaleString('pt-BR');
+                const html = `
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Relatório - ${periodLabel}</title>
+<style>
+    body{font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; margin:20px; color:#0f172a;}
+    h1{margin:0 0 6px 0; font-size:22px;}
+    .muted{color:#64748b; font-size:12px;}
+    .box{border:1px solid #e2e8f0; border-radius:12px; padding:12px; margin:14px 0;}
+    .grid{display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:10px;}
+    .k{font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:.08em; font-weight:700;}
+    .v{font-size:18px; font-weight:800;}
+    table{width:100%; border-collapse:collapse; margin-top:10px;}
+    th,td{border-bottom:1px solid #e2e8f0; padding:8px 6px; text-align:left; font-size:12px; vertical-align:top;}
+    th{background:#f8fafc; font-size:11px; text-transform:uppercase; letter-spacing:.06em;}
+    .right{text-align:right;}
+    .tag{display:inline-block; padding:2px 8px; border-radius:999px; font-size:10px; font-weight:800; border:1px solid #e2e8f0;}
+    .ok{background:#ecfdf5; color:#047857; border-color:#a7f3d0;}
+    .pend{background:#fff7ed; color:#9a3412; border-color:#fed7aa;}
+    @media print { .no-print{display:none} body{margin:0} }
+</style>
+</head>
+<body>
+<div class="no-print" style="display:flex; gap:10px; margin-bottom:12px;">
+  <button onclick="window.print()" style="padding:10px 14px; border-radius:10px; border:1px solid #0f172a; background:#0f172a; color:white; font-weight:800;">Imprimir / Salvar PDF</button>
+</div>
+
+<h1>Relatório de Ordens</h1>
+<div class="muted">Período: <b>${periodLabel}</b> • Base: <b>${baseLabel}</b> • Gerado em: ${nowStr}</div>
+
+<div class="box">
+  <div class="grid">
+    <div><div class="k">Ordens no período</div><div class="v">${totals.totalCount}</div></div>
+    <div><div class="k">Concluídas</div><div class="v">${totals.completedCount}</div></div>
+    <div><div class="k">Faturado (Concluídas)</div><div class="v">${new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(totals.revenueCompleted)}</div></div>
+    <div><div class="k">Somatório (todas)</div><div class="v">${new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(totals.revenueAll)}</div></div>
+  </div>
+  <div class="muted" style="margin-top:8px;">
+    * “Faturado” considera apenas OS com status <b>Concluído</b>. “Somatório” soma o campo Valor de todas as OS no período.
+  </div>
+</div>
+
+<div class="box">
+  <div class="k">Lista de ordens (mostrando: ${reportOptions.onlyCompleted ? 'apenas Concluídas' : 'todas'})</div>
+  <table>
+    <thead>
+      <tr>
+        <th>OS</th>
+        <th>Cliente</th>
+        <th>Modelo</th>
+        <th>Status</th>
+        <th>Entrada</th>
+        <th>Saída</th>
+        <th class="right">Valor</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rows.map(r => `
+        <tr>
+          <td>#${r.osNumber ?? ''}</td>
+          <td>${safeText(r.clientName)}</td>
+          <td>${safeText(`${r.deviceType || ''} ${r.deviceModel || ''}`.trim())}</td>
+          <td><span class="tag ${r.status === 'Concluído' ? 'ok' : 'pend'}">${safeText(r.status)}</span></td>
+          <td>${safeText(r.dateEntry)}</td>
+          <td>${safeText(r.dateExit)}</td>
+          <td class="right">${new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(parseFloat(r.price)||0)}</td>
+        </tr>
+      `).join('')}
+    </tbody>
+  </table>
+</div>
+
+<div class="muted">SmartOS • Relatório gerado automaticamente</div>
+</body>
+</html>`;
+
+                // Salva para abrir no modal interno e permitir baixar
+                setIsReportOpen(true);
+                // Guardar o HTML em window para reuso
+                window.__REPORT_HTML__ = html;
+
+                // Também gera CSV (sempre com o que está “mostrando”)
+                const csv = buildCSV(rows);
+                window.__REPORT_CSV__ = csv;
+                window.__REPORT_FILENAME__ = `relatorio_${baseLabel.toLowerCase()}_${periodLabel}`.replace(/\s+/g,'_').replace(/[\/:*?"<>|]/g,'') + '.csv';
+            };
+
+            const openReportInNewTab = () => {
+                const html = window.__REPORT_HTML__;
+                if (!html) return;
+                const blob = new Blob([html], { type: 'text/html' });
+                const url = URL.createObjectURL(blob);
+                window.open(url, '_blank');
+                setTimeout(() => URL.revokeObjectURL(url), 2000);
+            };
+
+            const downloadReportCSV = () => {
+                const csv = window.__REPORT_CSV__;
+                const filename = window.__REPORT_FILENAME__ || 'relatorio.csv';
+                if (!csv) return;
+                downloadTextFile(filename, csv, 'text/csv;charset=utf-8');
+            };
+
 
             const formatCurrency = (val) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(parseFloat(val || 0));
             const formatDateBR = (dateString) => { if(!dateString) return '--/--'; const [y, m, d] = dateString.split('-'); return `${d}/${m}/${y}`; };
@@ -573,14 +756,14 @@ if (loading) return <div className="min-h-screen flex items-center justify-cente
                                 <div className="bg-white p-3 rounded-2xl border border-gray-200 shadow-sm space-y-3">
                                     <div className="flex bg-gray-50 p-1 rounded-xl border border-gray-100 overflow-x-auto">
                                         {[{id:'day',l:'Dia'},{id:'week',l:'Semana'},{id:'month',l:'Mês'},{id:'year',l:'Ano'}].map(f=>(
-                                            <button key={f.id} onClick={()=>setTimeFilter(f.id)} className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold whitespace-nowrap ${timeFilter===f.id?'bg-slate-800 text-white':'text-gray-500'}`}>{f.l}</button>
+                                            <button key={f.id} onClick={()=>setTimeFilter(f.id)} className={`flex-1 py-2.5 px-4 rounded-xl text-sm font-bold whitespace-nowrap ${timeFilter===f.id?'bg-slate-800 text-white':'text-gray-500'}`}>{f.l}</button>
                                         ))}
                                     </div>
 
                                     <div className="flex items-center justify-between">
                                         <button
                                             onClick={() => setPeriodOffset(o => o - 1)}
-                                            className="px-3 py-2 rounded-xl bg-slate-900 text-white font-bold text-sm active:scale-95"
+                                            className="px-4 py-3 rounded-2xl bg-slate-900 text-white font-extrabold text-base active:scale-95"
                                             aria-label="Período anterior"
                                         >
                                             ‹
@@ -601,7 +784,7 @@ if (loading) return <div className="min-h-screen flex items-center justify-cente
 
                                         <button
                                             onClick={() => setPeriodOffset(o => o + 1)}
-                                            className="px-3 py-2 rounded-xl bg-slate-900 text-white font-bold text-sm active:scale-95"
+                                            className="px-4 py-3 rounded-2xl bg-slate-900 text-white font-extrabold text-base active:scale-95"
                                             aria-label="Próximo período"
                                         >
                                             ›
@@ -633,67 +816,110 @@ if (loading) return <div className="min-h-screen flex items-center justify-cente
                         {view === 'orders' && (
                             <div className="animate-in h-full flex flex-col">
                                 <div className="sticky top-0 z-10 bg-gray-50 pb-4">
-                                    <div className="flex gap-2 mb-4">
-                                        <div className="relative flex-1"><Search className="absolute left-3 top-3 text-gray-400" size={18}/><input className="w-full bg-white border-none shadow-sm rounded-xl py-3 pl-10 pr-4 text-sm font-medium outline-none" placeholder="Buscar..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} /></div>
-                                    <div className="bg-white p-3 rounded-2xl border border-gray-200 shadow-sm">
-                                        <div className="flex items-center justify-between mb-2">
-                                            <div className="flex items-center gap-2">
-                                                <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Base</span>
-                                                <select
-                                                    className="bg-gray-50 border border-gray-200 rounded-lg px-2 py-1 text-xs font-bold outline-none"
-                                                    value={ordersDateField}
-                                                    onChange={(e) => setOrdersDateField(e.target.value)}
-                                                >
-                                                    <option value="dateEntry">Entrada</option>
-                                                    <option value="dateExit">Saída</option>
-                                                </select>
+                                    <div className="rounded-2xl">
+                                        <div className="flex flex-col gap-3">
+                                            <div className="flex gap-2">
+                                                <div className="relative flex-1">
+                                                    <Search className="absolute left-3 top-3 text-gray-400" size={18}/>
+                                                    <input
+                                                        className="w-full bg-white border-none shadow-sm rounded-2xl py-4 pl-10 pr-4 text-base font-semibold outline-none"
+                                                        placeholder="Buscar..."
+                                                        value={searchTerm}
+                                                        onChange={e => setSearchTerm(e.target.value)}
+                                                    />
+                                                </div>
+                                                <Button onClick={openNewOS} className="!px-3 !rounded-xl shadow-sm">
+                                                    <Plus size={20} />
+                                                </Button>
                                             </div>
-                                            <div className="text-[10px] font-bold text-gray-500">
-                                                {filteredOrders.length} ordens no período
-                                            </div>
-                                        </div>
 
-                                        <div className="flex bg-gray-50 p-1 rounded-xl border border-gray-100 overflow-x-auto mb-2">
-                                            {[{id:'day',l:'Dia'},{id:'week',l:'Semana'},{id:'month',l:'Mês'},{id:'year',l:'Ano'}].map(f=>(
-                                                <button key={f.id} onClick={()=>setOrdersTimeFilter(f.id)} className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold whitespace-nowrap ${ordersTimeFilter===f.id?'bg-slate-800 text-white':'text-gray-500'}`}>{f.l}</button>
-                                            ))}
-                                        </div>
+                                            <div className="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm">
+                                                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Base</span>
+                                                        <select
+                                                            className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-xs font-bold outline-none"
+                                                            value={ordersDateField}
+                                                            onChange={(e) => setOrdersDateField(e.target.value)}
+                                                        >
+                                                            <option value="dateEntry">Entrada</option>
+                                                            <option value="dateExit">Saída</option>
+                                                        </select>
+                                                    </div>
 
-                                        <div className="flex items-center justify-between">
-                                            <button
-                                                onClick={() => setOrdersPeriodOffset(o => o - 1)}
-                                                className="px-3 py-2 rounded-xl bg-slate-900 text-white font-bold text-sm active:scale-95"
-                                                aria-label="Período anterior"
-                                            >
-                                                ‹
-                                            </button>
+                                                    <div className="text-xs font-bold text-gray-600 bg-gray-50 border border-gray-100 px-3 py-2 rounded-xl w-fit">
+                                                        {filteredOrders.length} ordens no período
+                                                    </div>
+                                                </div>
 
-                                            <div className="text-center">
-                                                <div className="text-[10px] uppercase tracking-wider text-gray-400 font-bold">Período</div>
-                                                <div className="font-extrabold text-slate-800">{getOrdersPeriodLabel()}</div>
-                                                {ordersPeriodOffset !== 0 && (
+                                                <div className="flex bg-gray-50 p-1.5 rounded-2xl border border-gray-100 overflow-x-auto mb-3">
+                                                    {[{id:'day',l:'Dia'},{id:'week',l:'Semana'},{id:'month',l:'Mês'},{id:'year',l:'Ano'}].map(f=>(
+                                                        <button
+                                                            key={f.id}
+                                                            onClick={()=>setOrdersTimeFilter(f.id)}
+                                                            className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-extrabold whitespace-nowrap transition-all ${ordersTimeFilter===f.id?'bg-slate-800 text-white shadow':'text-gray-500'}`}
+                                                        >
+                                                            {f.l}
+                                                        </button>
+                                                    ))}
+                                                </div>
+
+                                                <div className="flex items-center justify-between gap-3">
                                                     <button
-                                                        onClick={() => setOrdersPeriodOffset(0)}
-                                                        className="text-xs font-bold text-blue-600 mt-1"
+                                                        onClick={() => setOrdersPeriodOffset(o => o - 1)}
+                                                        className="px-4 py-3 rounded-2xl bg-slate-900 text-white font-extrabold text-lg active:scale-95"
+                                                        aria-label="Período anterior"
                                                     >
-                                                        Voltar para o atual
+                                                        ‹
                                                     </button>
-                                                )}
-                                            </div>
 
-                                            <button
-                                                onClick={() => setOrdersPeriodOffset(o => o + 1)}
-                                                className="px-3 py-2 rounded-xl bg-slate-900 text-white font-bold text-sm active:scale-95"
-                                                aria-label="Próximo período"
-                                            >
-                                                ›
-                                            </button>
+                                                    <div className="text-center flex-1">
+                                                        <div className="text-[10px] uppercase tracking-wider text-gray-400 font-bold">Período</div>
+                                                        <div className="font-extrabold text-slate-800 text-base sm:text-lg">
+                                                            {getOrdersPeriodLabel()}
+                                                        </div>
+                                                        {ordersPeriodOffset !== 0 && (
+                                                            <button
+                                                                onClick={() => setOrdersPeriodOffset(0)}
+                                                                className="text-xs font-bold text-blue-600 mt-1"
+                                                            >
+                                                                Voltar para o atual
+                                                            </button>
+                                                        )}
+                                                    </div>
+
+                                                    <button
+                                                        onClick={() => setOrdersPeriodOffset(o => o + 1)}
+                                                        className="px-4 py-3 rounded-2xl bg-slate-900 text-white font-extrabold text-lg active:scale-95"
+                                                        aria-label="Próximo período"
+                                                    >
+                                                        ›
+                                                    </button>
+                                                </div>
+
+                                                <div className="mt-4 pt-4 border-t border-gray-100 space-y-3">
+                                                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                                                        <label className="flex items-center gap-2 text-xs font-bold text-gray-700">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={reportOptions.onlyCompleted}
+                                                                onChange={(e) => setReportOptions(o => ({...o, onlyCompleted: e.target.checked}))}
+                                                            />
+                                                            Incluir apenas Concluídas no relatório
+                                                        </label>
+                                                        <Button
+                                                            variant="primary"
+                                                            onClick={generateMonthlyReport}
+                                                            className="!py-3 !px-4 !text-sm w-full sm:w-auto"
+                                                        >
+                                                            <FileText size={16}/> Relatório
+                                                        </Button>
+                                                    </div>
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
-
-                                        <Button onClick={openNewOS} className="!px-3 !rounded-xl shadow-sm"><Plus size={20} /></Button>
-                                    </div>
-                                </div>
+                                </div></div>
                                 <div className="space-y-4 pb-20">
                                     {filteredOrders.map(order => (
                                         <div key={order.id} onClick={() => openViewOS(order)} className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 active:scale-[0.98] transition-transform relative">
@@ -815,7 +1041,41 @@ if (loading) return <div className="min-h-screen flex items-center justify-cente
                     {isDeleteModalOpen && <div className="fixed inset-0 z-[80] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"><div className="bg-white w-full max-w-sm rounded-2xl p-6 shadow-2xl animate-in text-center"><div className="w-16 h-16 bg-red-100 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4"><AlertTriangle size={32} /></div><h3 className="text-xl font-bold text-gray-800 mb-2">Excluir OS?</h3><p className="text-gray-500 mb-6 text-sm">Essa ação não pode ser desfeita.</p><div className="flex gap-3"><Button variant="secondary" onClick={() => setIsDeleteModalOpen(false)} className="flex-1">Cancelar</Button><Button variant="destructive" onClick={confirmDelete} className="flex-1">Excluir</Button></div></div></div>}
 
                     {/* MODAL RECIBO */}
-                    {receiptData && (
+                    
+                    {/* MODAL RELATÓRIO */}
+                    {isReportOpen && (
+                        <div className="fixed inset-0 z-[100] bg-white flex flex-col animate-in">
+                            <div className="p-4 bg-slate-900 text-white flex justify-between items-center shadow-lg">
+                                <h3 className="font-bold flex items-center gap-2"><FileText size={20}/> Relatório</h3>
+                                <div className="flex gap-2">
+                                    <button onClick={openReportInNewTab} className="bg-blue-600 px-3 py-2 rounded-lg font-bold text-sm shadow-sm flex items-center gap-2 active:scale-95">
+                                        <Share2 size={16}/> Abrir
+                                    </button>
+                                    <button onClick={downloadReportCSV} className="bg-green-600 px-3 py-2 rounded-lg font-bold text-sm shadow-sm flex items-center gap-2 active:scale-95">
+                                        <Download size={16}/> CSV
+                                    </button>
+                                    <button onClick={() => setIsReportOpen(false)} className="bg-slate-700 px-3 py-2 rounded-lg text-sm font-bold active:scale-95">
+                                        <X size={18}/>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="flex-1 overflow-y-auto bg-gray-100 p-4">
+                                <div className="bg-white rounded-2xl shadow-xl border border-gray-200 overflow-hidden">
+                                    <iframe
+                                        title="Relatório"
+                                        srcDoc={window.__REPORT_HTML__ || '<div style="padding:16px;font-family:system-ui">Gerando relatório…</div>'}
+                                        style={{ width: '100%', height: '80vh', border: '0' }}
+                                    />
+                                </div>
+
+                                <p className="text-xs text-gray-500 mt-3">
+                                    Dica: toque em <b>Abrir</b> para imprimir ou salvar em PDF pelo navegador.
+                                </p>
+                            </div>
+                        </div>
+                    )}
+{receiptData && (
                         <div id="receipt-overlay" className="fixed inset-0 z-[100] bg-white flex flex-col animate-in">
                             <div className="no-print p-4 bg-slate-900 text-white flex justify-between items-center shadow-lg"><h3 className="font-bold flex items-center gap-2"><FileText size={20}/> Visualizar Recibo</h3><div className="flex gap-3"><button onClick={printReceipt} className="bg-green-600 px-4 py-2 rounded-lg font-bold text-sm shadow-sm flex items-center gap-2 active:scale-95"><Printer size={16}/> Imprimir</button><button onClick={closeReceipt} className="bg-slate-700 px-3 py-2 rounded-lg text-sm font-bold active:scale-95"><X size={18}/></button></div></div>
                             <div className="flex-1 overflow-y-auto bg-gray-100 p-4 flex justify-center"><div id="receipt-content" className="bg-white w-full max-w-[350px] shadow-xl p-6 text-black font-mono text-sm leading-relaxed h-fit border border-gray-200"><h2 className="text-center font-bold text-xl mb-1 uppercase tracking-widest">SmartOS</h2><p className="text-center text-xs text-gray-500 mb-4">Assistência Técnica Especializada</p><div className="border-b-2 border-dashed border-gray-300 my-4"></div><div className="flex justify-between font-bold text-lg mb-2"><span>OS #{receiptData.osNumber}</span><span>{formatDateBR(new Date().toISOString().split('T')[0])}</span></div><div className="space-y-1 mb-4"><p><span className="font-bold">CLIENTE:</span> {receiptData.clientName}</p><p><span className="font-bold">TELEFONE:</span> {receiptData.clientPhone || 'N/A'}</p><p><span className="font-bold">APARELHO:</span> {receiptData.deviceType} {receiptData.deviceModel}</p><p><span className="font-bold">DEFEITO:</span> {receiptData.problem}</p>{Object.values(receiptData.checklist || {}).some(x=>x) && (<p className="text-xs mt-2"><span className="font-bold">OBS. ENTRADA:</span> {Object.entries(receiptData.checklist).filter(([_,v])=>v).map(([k])=>k === 'wontTurnOn'?'Não Liga':k==='screenBroken'?'Tela Queb.':k==='backBroken'?'Tampa Queb.':k==='notCharging'?'Não Carrega':k==='noWifi'?'Sem Wifi':'Câmera Ruim').join(', ')}</p>)}</div><div className="border-b-2 border-dashed border-gray-300 my-4"></div><div className="space-y-2"><div className="flex justify-between"><span>Total Serviço</span> <span className="font-bold">R$ {parseFloat(receiptData.price || 0).toFixed(2)}</span></div><div className="flex justify-between text-gray-500"><span>Descontos/Pagos</span> <span>- R$ {(receiptData.payments || []).reduce((a,c)=>a+c.amount,0).toFixed(2)}</span></div><div className="border-t border-gray-200 my-1"></div><div className="flex justify-between text-lg font-bold"><span>A PAGAR</span> <span>R$ {(parseFloat(receiptData.price || 0) - (receiptData.payments || []).reduce((a,c)=>a+c.amount,0)).toFixed(2)}</span></div></div><div className="border-b-2 border-dashed border-gray-300 my-4"></div><div className="text-[10px] text-justify text-gray-500 leading-tight"><p className="font-bold mb-1">TERMOS DE GARANTIA:</p><p>1. Garantia de <span className="font-bold text-black">{receiptData.warrantyDays || 90} dias</span> válida até {getWarrantyInfo(receiptData.dateExit || new Date().toISOString(), receiptData.warrantyDays || 90)?.expiryDate}.</p><p>2. A garantia não cobre danos causados por mau uso, contato com líquidos ou quedas.</p><p>3. Aparelhos não retirados em até 90 dias serão vendidos para custeio (Art. 1.275 CC).</p></div><div className="mt-12 border-t border-black pt-2 text-center text-xs">Assinatura do Cliente</div><p className="text-center mt-6 font-bold text-xs">Obrigado pela preferência!</p></div></div>
